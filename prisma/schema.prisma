@@ -1,0 +1,1215 @@
+// ============================================
+// HealthPilot Database Schema
+// ============================================
+// This schema defines the complete data model for the HealthPilot platform
+// Following HIPAA/GDPR compliance requirements
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum UserRole {
+  USER
+  PROVIDER_ADMIN
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum IntakeStatus {
+  DRAFT
+  IN_PROGRESS
+  COMPLETED
+  EXPIRED
+}
+
+enum BloodTestStatus {
+  PENDING
+  ORDERED
+  SAMPLE_COLLECTED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum RecommendationStatus {
+  GENERATED
+  VIEWED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum HandoffStatus {
+  INITIATED
+  DATA_TRANSFERRED
+  PROVIDER_RECEIVED
+  CONSULTATION_SCHEDULED
+  TREATMENT_STARTED
+  COMPLETED
+  CANCELLED
+}
+
+enum ProviderStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+  INACTIVE
+}
+
+enum TreatmentCategory {
+  HORMONE_THERAPY
+  WEIGHT_MANAGEMENT
+  SEXUAL_HEALTH
+  MENTAL_HEALTH
+  LONGEVITY
+  SKIN_HEALTH
+  HAIR_HEALTH
+  SLEEP_OPTIMIZATION
+  COGNITIVE_ENHANCEMENT
+  GENERAL_WELLNESS
+}
+
+enum MatchingRuleOperator {
+  EQUALS
+  NOT_EQUALS
+  GREATER_THAN
+  LESS_THAN
+  GREATER_THAN_OR_EQUALS
+  LESS_THAN_OR_EQUALS
+  CONTAINS
+  NOT_CONTAINS
+  IN
+  NOT_IN
+  BETWEEN
+  IS_NULL
+  IS_NOT_NULL
+}
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  HANDOFF
+}
+
+// ============================================
+// USER MANAGEMENT
+// ============================================
+
+/// User account - can be anonymous or registered
+model User {
+  id                String      @id @default(uuid()) @db.Uuid
+  email             String?     @unique
+  passwordHash      String?     @map("password_hash")
+  firstName         String?     @map("first_name")
+  lastName          String?     @map("last_name")
+  dateOfBirth       DateTime?   @map("date_of_birth") @db.Date
+  gender            Gender?
+  phoneNumber       String?     @map("phone_number")
+  isAnonymous       Boolean     @default(true) @map("is_anonymous")
+  isEmailVerified   Boolean     @default(false) @map("is_email_verified")
+  status            UserStatus  @default(ACTIVE)
+  role              UserRole    @default(USER)
+  lastLoginAt       DateTime?   @map("last_login_at")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  // Relations
+  healthIntakes     HealthIntake[]
+  bloodTests        BloodTest[]
+  recommendations   Recommendation[]
+  providerHandoffs  ProviderHandoff[]
+  userPreferences   UserPreference?
+  refreshTokens     RefreshToken[]
+  auditLogs         AuditLog[]
+  notifications     Notification[]
+  providerRatings   ProviderRating[]
+  treatmentFeedback TreatmentFeedback[]
+
+  @@index([email])
+  @@index([status])
+  @@index([createdAt])
+  @@map("users")
+}
+
+/// User preferences for treatment and communication
+model UserPreference {
+  id                    String    @id @default(uuid()) @db.Uuid
+  userId                String    @unique @map("user_id") @db.Uuid
+  riskTolerance         String?   @map("risk_tolerance") // low, medium, high
+  budgetSensitivity     String?   @map("budget_sensitivity") // low, medium, high
+  preferSubscription    Boolean?  @map("prefer_subscription")
+  deliveryPreference    String?   @map("delivery_preference") // home, clinic, pharmacy
+  communicationChannel  String?   @map("communication_channel") // email, sms, both
+  marketingConsent      Boolean   @default(false) @map("marketing_consent")
+  dataResearchConsent   Boolean   @default(false) @map("data_research_consent")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+/// Refresh tokens for JWT authentication
+model RefreshToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  token       String    @unique
+  expiresAt   DateTime  @map("expires_at")
+  isRevoked   Boolean   @default(false) @map("is_revoked")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ============================================
+// HEALTH INTAKE
+// ============================================
+
+/// Health intake questionnaire responses (PHI - ENCRYPTED)
+model HealthIntake {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String        @map("user_id") @db.Uuid
+  status            IntakeStatus  @default(DRAFT)
+  version           Int           @default(1)
+  
+  // Encrypted JSON containing all health data
+  // Structure: { medicalHistory, familyHistory, symptoms, goals, lifestyle, etc. }
+  intakeDataEncrypted String      @map("intake_data_encrypted") @db.Text
+  
+  // Non-sensitive metadata for querying
+  primaryGoals      String[]      @map("primary_goals")
+  hasChronicConditions Boolean?   @map("has_chronic_conditions")
+  takingMedications Boolean?      @map("taking_medications")
+  
+  completedAt       DateTime?     @map("completed_at")
+  expiresAt         DateTime?     @map("expires_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  user              User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bloodTests        BloodTest[]
+  recommendations   Recommendation[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("health_intakes")
+}
+
+// ============================================
+// BLOOD TESTING
+// ============================================
+
+/// Blood test orders and results (PHI - ENCRYPTED)
+model BloodTest {
+  id                  String          @id @default(uuid()) @db.Uuid
+  userId              String          @map("user_id") @db.Uuid
+  healthIntakeId      String?         @map("health_intake_id") @db.Uuid
+  labPartnerId        String?         @map("lab_partner_id") @db.Uuid
+  status              BloodTestStatus @default(PENDING)
+  
+  // Panel information
+  panelType           String          @map("panel_type") // targeted, goal-based, comprehensive
+  biomarkersRequested String[]        @map("biomarkers_requested")
+  
+  // Encrypted results
+  resultsEncrypted    String?         @map("results_encrypted") @db.Text
+  
+  // Metadata
+  orderedAt           DateTime?       @map("ordered_at")
+  sampleCollectedAt   DateTime?       @map("sample_collected_at")
+  resultsReceivedAt   DateTime?       @map("results_received_at")
+  expiresAt           DateTime?       @map("expires_at")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  healthIntake        HealthIntake?   @relation(fields: [healthIntakeId], references: [id])
+  labPartner          LabPartner?     @relation(fields: [labPartnerId], references: [id])
+  biomarkerResults    BiomarkerResult[]
+  interpretation      BloodTestInterpretation?
+
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("blood_tests")
+}
+
+/// Individual biomarker results
+model BiomarkerResult {
+  id              String    @id @default(uuid()) @db.Uuid
+  bloodTestId     String    @map("blood_test_id") @db.Uuid
+  biomarkerId     String    @map("biomarker_id") @db.Uuid
+  value           Decimal   @db.Decimal(10, 4)
+  unit            String
+  referenceMin    Decimal?  @map("reference_min") @db.Decimal(10, 4)
+  referenceMax    Decimal?  @map("reference_max") @db.Decimal(10, 4)
+  isAbnormal      Boolean   @default(false) @map("is_abnormal")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  bloodTest       BloodTest @relation(fields: [bloodTestId], references: [id], onDelete: Cascade)
+  biomarker       Biomarker @relation(fields: [biomarkerId], references: [id])
+
+  @@index([bloodTestId])
+  @@index([biomarkerId])
+  @@map("biomarker_results")
+}
+
+/// Biomarker definitions
+model Biomarker {
+  id              String    @id @default(uuid()) @db.Uuid
+  code            String    @unique // e.g., "TSH", "TESTOSTERONE_TOTAL"
+  name            String
+  description     String?   @db.Text
+  unit            String
+  category        String    // hormone, metabolic, vitamin, etc.
+  referenceMinMale    Decimal?  @map("reference_min_male") @db.Decimal(10, 4)
+  referenceMaxMale    Decimal?  @map("reference_max_male") @db.Decimal(10, 4)
+  referenceMinFemale  Decimal?  @map("reference_min_female") @db.Decimal(10, 4)
+  referenceMaxFemale  Decimal?  @map("reference_max_female") @db.Decimal(10, 4)
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  biomarkerResults    BiomarkerResult[]
+  treatmentBiomarkers TreatmentBiomarker[]
+
+  @@index([code])
+  @@index([category])
+  @@map("biomarkers")
+}
+
+/// Lab partners for blood testing
+model LabPartner {
+  id              String    @id @default(uuid()) @db.Uuid
+  name            String
+  code            String    @unique
+  apiEndpoint     String?   @map("api_endpoint")
+  isActive        Boolean   @default(true) @map("is_active")
+  supportedRegions String[] @map("supported_regions")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  bloodTests      BloodTest[]
+
+  @@map("lab_partners")
+}
+
+// ============================================
+// RECOMMENDATIONS & AI
+// ============================================
+
+/// AI-generated recommendations
+model Recommendation {
+  id                    String              @id @default(uuid()) @db.Uuid
+  userId                String              @map("user_id") @db.Uuid
+  healthIntakeId        String              @map("health_intake_id") @db.Uuid
+  status                RecommendationStatus @default(GENERATED)
+  
+  // AI-generated content (encrypted)
+  healthSummaryEncrypted    String          @map("health_summary_encrypted") @db.Text
+  
+  // Non-sensitive summary for display
+  primaryRecommendations    String[]        @map("primary_recommendations")
+  
+  // AI metadata
+  aiModelVersion        String              @map("ai_model_version")
+  promptVersion         String              @map("prompt_version")
+  tokensUsed            Int                 @map("tokens_used")
+  
+  viewedAt              DateTime?           @map("viewed_at")
+  expiresAt             DateTime?           @map("expires_at")
+  createdAt             DateTime            @default(now()) @map("created_at")
+  updatedAt             DateTime            @updatedAt @map("updated_at")
+
+  // Relations
+  user                  User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  healthIntake          HealthIntake        @relation(fields: [healthIntakeId], references: [id])
+  treatmentMatches      TreatmentMatch[]
+  supplementMatches     SupplementMatch[]
+  providerHandoffs      ProviderHandoff[]
+
+  @@index([userId])
+  @@index([healthIntakeId])
+  @@index([status])
+  @@map("recommendations")
+}
+
+
+/// Treatment matches for a recommendation
+model TreatmentMatch {
+  id                String          @id @default(uuid()) @db.Uuid
+  recommendationId  String          @map("recommendation_id") @db.Uuid
+  treatmentId       String          @map("treatment_id") @db.Uuid
+  relevanceScore    Decimal         @map("relevance_score") @db.Decimal(5, 4) // 0.0000 to 1.0000
+  matchReasons      String[]        @map("match_reasons")
+  contraindications String[]
+  isEligible        Boolean         @default(true) @map("is_eligible")
+  displayOrder      Int             @map("display_order")
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  recommendation    Recommendation  @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  treatment         Treatment       @relation(fields: [treatmentId], references: [id])
+
+  @@index([recommendationId])
+  @@index([treatmentId])
+  @@map("treatment_matches")
+}
+
+// ============================================
+// PROVIDERS & TREATMENTS
+// ============================================
+
+/// Healthcare providers
+model Provider {
+  id                String          @id @default(uuid()) @db.Uuid
+  name              String
+  slug              String          @unique
+  description       String?         @db.Text
+  logoUrl           String?         @map("logo_url")
+  websiteUrl        String?         @map("website_url")
+  status            ProviderStatus  @default(PENDING_APPROVAL)
+  
+  // Business details
+  registrationNumber String?        @map("registration_number")
+  supportedRegions  String[]        @map("supported_regions")
+  
+  // Integration
+  apiEndpoint       String?         @map("api_endpoint")
+  webhookUrl        String?         @map("webhook_url")
+  acceptsBloodTests Boolean         @default(true) @map("accepts_blood_tests")
+  
+  // Commercial terms
+  commissionRate    Decimal?        @map("commission_rate") @db.Decimal(5, 4)
+  subscriptionShare Decimal?        @map("subscription_share") @db.Decimal(5, 4)
+  
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  treatments        Treatment[]
+  providerHandoffs  ProviderHandoff[]
+  providerAdmins    ProviderAdmin[]
+  webhooks          ProviderWebhook[]
+  providerRatings   ProviderRating[]
+  treatmentFeedback TreatmentFeedback[]
+  providerRatingSummary ProviderRatingSummary?
+  treatmentFeedbackSummaries TreatmentFeedbackSummary[]
+
+  @@index([slug])
+  @@index([status])
+  @@map("providers")
+}
+
+/// Provider admin users
+model ProviderAdmin {
+  id          String    @id @default(uuid()) @db.Uuid
+  providerId  String    @map("provider_id") @db.Uuid
+  email       String    @unique
+  name        String
+  isActive    Boolean   @default(true) @map("is_active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  provider    Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@map("provider_admins")
+}
+
+/// Treatment definitions
+model Treatment {
+  id                String            @id @default(uuid()) @db.Uuid
+  providerId        String            @map("provider_id") @db.Uuid
+  name              String
+  slug              String            @unique
+  description       String?           @db.Text
+  category          TreatmentCategory
+  
+  // Capabilities
+  supportedCategories String?         @map("supported_categories") @db.Text
+  
+  // Pricing
+  priceOneTime      Decimal?          @map("price_one_time") @db.Decimal(10, 2)
+  priceSubscription Decimal?          @map("price_subscription") @db.Decimal(10, 2)
+  subscriptionFrequency String?       @map("subscription_frequency") // monthly, quarterly, etc.
+  currency          String            @default("GBP")
+  
+  // Eligibility
+  minAge            Int?              @map("min_age")
+  maxAge            Int?              @map("max_age")
+  allowedGenders    Gender[]          @map("allowed_genders")
+  requiresBloodTest Boolean           @default(false) @map("requires_blood_test")
+  
+  isActive          Boolean           @default(true) @map("is_active")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  provider          Provider          @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  treatmentMatches  TreatmentMatch[]
+  matchingRules     MatchingRule[]
+  treatmentBiomarkers TreatmentBiomarker[]
+  contraindications TreatmentContraindication[]
+  treatmentFeedback TreatmentFeedback[]
+  treatmentFeedbackSummary TreatmentFeedbackSummary?
+
+  @@index([providerId])
+  @@index([category])
+  @@index([slug])
+  @@map("treatments")
+}
+
+/// Required biomarkers for treatments
+model TreatmentBiomarker {
+  id            String    @id @default(uuid()) @db.Uuid
+  treatmentId   String    @map("treatment_id") @db.Uuid
+  biomarkerId   String    @map("biomarker_id") @db.Uuid
+  isRequired    Boolean   @default(true) @map("is_required")
+  minValue      Decimal?  @map("min_value") @db.Decimal(10, 4)
+  maxValue      Decimal?  @map("max_value") @db.Decimal(10, 4)
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  treatment     Treatment @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+  biomarker     Biomarker @relation(fields: [biomarkerId], references: [id])
+
+  @@unique([treatmentId, biomarkerId])
+  @@map("treatment_biomarkers")
+}
+
+/// Treatment contraindications
+model TreatmentContraindication {
+  id            String    @id @default(uuid()) @db.Uuid
+  treatmentId   String    @map("treatment_id") @db.Uuid
+  condition     String    // e.g., "pregnancy", "heart_disease"
+  severity      String    // absolute, relative
+  description   String?   @db.Text
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  treatment     Treatment @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+
+  @@index([treatmentId])
+  @@map("treatment_contraindications")
+}
+
+// ============================================
+// MATCHING RULES ENGINE
+// ============================================
+
+/// Matching rules for treatment eligibility
+model MatchingRule {
+  id            String                @id @default(uuid()) @db.Uuid
+  treatmentId   String                @map("treatment_id") @db.Uuid
+  name          String
+  description   String?               @db.Text
+  field         String                // e.g., "age", "gender", "biomarker.TSH"
+  operator      MatchingRuleOperator
+  value         String                // JSON-encoded value
+  weight        Decimal               @default(1.0) @db.Decimal(5, 4)
+  isRequired    Boolean               @default(false) @map("is_required")
+  isActive      Boolean               @default(true) @map("is_active")
+  priority      Int                   @default(0)
+  
+  // Rule Builder Fields
+  triggerSource         String?         @map("trigger_source") // Guided intake, Blood test, Both
+  evaluationTiming      String?         @map("evaluation_timing") // Immediate, Deferred
+  providerCapabilities  String[]        @map("provider_capabilities")
+  locationConstraints   String[]        @map("location_constraints")
+  availabilityStatus    String?         @map("availability_status")
+  linkedTreatments      String[]        @map("linked_treatments")
+  confidence            String?         // Low, Medium, High
+  explanation           String?         @db.Text
+  exclusionReasons      String[]        @map("exclusion_reasons")
+  
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+
+  // Relations
+  treatment     Treatment             @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+
+  @@index([treatmentId])
+  @@index([field])
+  @@map("matching_rules")
+}
+
+// ============================================
+// PROVIDER HANDOFF
+// ============================================
+
+/// Provider handoff tracking
+model ProviderHandoff {
+  id                  String        @id @default(uuid()) @db.Uuid
+  userId              String        @map("user_id") @db.Uuid
+  providerId          String        @map("provider_id") @db.Uuid
+  recommendationId    String        @map("recommendation_id") @db.Uuid
+  status              HandoffStatus @default(INITIATED)
+  
+  // Encrypted handoff data
+  handoffDataEncrypted String       @map("handoff_data_encrypted") @db.Text
+  
+  // Attribution tracking
+  attributionId       String        @unique @map("attribution_id") @db.Uuid
+  
+  // Timestamps
+  initiatedAt         DateTime      @default(now()) @map("initiated_at")
+  dataTransferredAt   DateTime?     @map("data_transferred_at")
+  providerReceivedAt  DateTime?     @map("provider_received_at")
+  treatmentStartedAt  DateTime?     @map("treatment_started_at")
+  completedAt         DateTime?     @map("completed_at")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  user                User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider            Provider      @relation(fields: [providerId], references: [id])
+  recommendation      Recommendation @relation(fields: [recommendationId], references: [id])
+  attributionEvents   AttributionEvent[]
+  providerRatings     ProviderRating[]
+  treatmentFeedback   TreatmentFeedback[]
+
+  @@index([userId])
+  @@index([providerId])
+  @@index([status])
+  @@index([attributionId])
+  @@map("provider_handoffs")
+}
+
+/// Attribution events for revenue tracking
+model AttributionEvent {
+  id                String          @id @default(uuid()) @db.Uuid
+  handoffId         String          @map("handoff_id") @db.Uuid
+  eventType         String          @map("event_type") // treatment_started, subscription_renewed, etc.
+  revenueAmount     Decimal?        @map("revenue_amount") @db.Decimal(10, 2)
+  commissionAmount  Decimal?        @map("commission_amount") @db.Decimal(10, 2)
+  currency          String          @default("GBP")
+  metadata          Json?
+  occurredAt        DateTime        @map("occurred_at")
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  handoff           ProviderHandoff @relation(fields: [handoffId], references: [id], onDelete: Cascade)
+
+  @@index([handoffId])
+  @@index([eventType])
+  @@index([occurredAt])
+  @@map("attribution_events")
+}
+
+// ============================================
+// AUDIT & COMPLIANCE
+// ============================================
+
+/// Audit log for PHI access (HIPAA/GDPR compliance)
+model AuditLog {
+  id            String      @id @default(uuid()) @db.Uuid
+  userId        String?     @map("user_id") @db.Uuid
+  action        AuditAction
+  resourceType  String      @map("resource_type") // e.g., "health_intake", "blood_test"
+  resourceId    String?     @map("resource_id") @db.Uuid
+  ipAddress     String?     @map("ip_address")
+  userAgent     String?     @map("user_agent")
+  metadata      Json?
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  // Relations
+  user          User?       @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// AI PROMPT MANAGEMENT
+// ============================================
+
+/// AI prompt versions for reproducibility
+model AIPromptVersion {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String    // e.g., "health_analysis", "treatment_matching"
+  version       String
+  promptTemplate String   @map("prompt_template") @db.Text
+  systemPrompt  String?   @map("system_prompt") @db.Text
+  isActive      Boolean   @default(false) @map("is_active")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@unique([name, version])
+  @@index([name])
+  @@index([isActive])
+  @@map("ai_prompt_versions")
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+/// User notifications across all channels
+model Notification {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  channel       String    // email, push, sms, in_app
+  type          String    // notification type identifier
+  title         String
+  body          String    @db.Text
+  data          Json?     // additional structured data
+  priority      String    @default("normal") // low, normal, high, urgent
+  status        String    @default("PENDING") // PENDING, SCHEDULED, SENT, FAILED, CANCELLED
+  scheduledFor  DateTime? @map("scheduled_for")
+  sentAt        DateTime? @map("sent_at")
+  readAt        DateTime? @map("read_at")
+  externalId    String?   @map("external_id") // ID from external provider (SendGrid, etc.)
+  errorMessage  String?   @map("error_message")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([channel])
+  @@index([scheduledFor])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ============================================
+// PROVIDER WEBHOOKS
+// ============================================
+
+/// Webhook configurations for provider integrations
+model ProviderWebhook {
+  id              String    @id @default(uuid()) @db.Uuid
+  providerId      String    @map("provider_id") @db.Uuid
+  eventType       String    @map("event_type") // handoff, status_update, result
+  url             String    // Webhook endpoint URL
+  secret          String    // Webhook secret for signature verification
+  headers         Json?     // Custom headers to include
+  isActive        Boolean   @default(true) @map("is_active")
+  retryCount      Int       @default(3) @map("retry_count")
+  timeoutMs       Int       @default(30000) @map("timeout_ms")
+  lastCallAt      DateTime? @map("last_call_at")
+  lastStatus      Int?      @map("last_status") // HTTP status code
+  failureCount    Int       @default(0) @map("failure_count")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  provider        Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  logs            WebhookLog[]
+
+  @@unique([providerId, eventType])
+  @@index([providerId])
+  @@index([eventType])
+  @@index([isActive])
+  @@map("provider_webhooks")
+}
+
+/// Webhook delivery logs
+model WebhookLog {
+  id              String    @id @default(uuid()) @db.Uuid
+  webhookId       String    @map("webhook_id") @db.Uuid
+  handoffId       String?   @map("handoff_id") @db.Uuid
+  requestPayload  Json      @map("request_payload")
+  responseStatus  Int?      @map("response_status")
+  responseBody    String?   @map("response_body") @db.Text
+  duration        Int?      // Response time in ms
+  error           String?
+  attempt         Int       @default(1)
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  webhook         ProviderWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+
+  @@index([webhookId])
+  @@index([handoffId])
+  @@index([createdAt])
+  @@map("webhook_logs")
+}
+
+// ============================================
+// BLOOD TEST INTERPRETATION
+// ============================================
+
+/// AI-generated blood test interpretations
+model BloodTestInterpretation {
+  id                  String    @id @default(uuid()) @db.Uuid
+  bloodTestId         String    @unique @map("blood_test_id") @db.Uuid
+  summaryEncrypted    String    @map("summary_encrypted") @db.Text
+  findingsEncrypted   String    @map("findings_encrypted") @db.Text // JSON array of findings
+  actionsEncrypted    String    @map("actions_encrypted") @db.Text // JSON array of recommended actions
+  tokensUsed          Int       @map("tokens_used")
+  modelVersion        String    @map("model_version")
+  promptVersion       String    @map("prompt_version")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  bloodTest           BloodTest @relation(fields: [bloodTestId], references: [id], onDelete: Cascade)
+
+  @@index([bloodTestId])
+  @@map("blood_test_interpretations")
+}
+
+// ============================================
+// ANALYTICS LAYER (ANONYMIZED DATA)
+// ============================================
+// These tables store anonymized, non-identifiable copies of user data
+// for aggregate analytics, provider benchmarking, and research purposes.
+// Data is written at intake/bloodtest creation time to ensure no data is lost.
+
+/// Anonymized health intake data for analytics (non-PHI)
+model AnalyticsHealthIntake {
+  id                    String    @id @default(uuid()) @db.Uuid
+  intakeId              String    @unique @map("intake_id") @db.Uuid // Reference only, no FK to prevent identity correlation
+  
+  // Demographic buckets (not exact values)
+  ageBucket             String?   @map("age_bucket") // e.g., "18-24", "25-34", "35-44"
+  gender                String?   // anonymized gender
+  region                String?   // country or region code
+  
+  // Health profile flags (non-identifying)
+  primaryGoals          String[]  @map("primary_goals")
+  symptomCategories     String[]  @map("symptom_categories") // e.g., ["fatigue", "weight"]
+  hasChronicConditions  Boolean?  @map("has_chronic_conditions")
+  takingMedications     Boolean?  @map("taking_medications")
+  
+  // Lifestyle buckets
+  exerciseLevel         String?   @map("exercise_level") // sedentary, moderate, active
+  stressLevel           String?   @map("stress_level") // low, medium, high
+  sleepQuality          String?   @map("sleep_quality") // poor, fair, good
+  dietType              String?   @map("diet_type") // omnivore, vegetarian, vegan, etc.
+  
+  // Preference flags
+  riskTolerance         String?   @map("risk_tolerance") // low, medium, high
+  budgetSensitivity     String?   @map("budget_sensitivity") // low, medium, high
+  preferSubscription    Boolean?  @map("prefer_subscription")
+  
+  // Timestamps
+  intakeCompletedAt     DateTime? @map("intake_completed_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  @@index([ageBucket])
+  @@index([gender])
+  @@index([region])
+  @@index([primaryGoals])
+  @@index([createdAt])
+  @@map("analytics_health_intakes")
+}
+
+/// Anonymized blood test data for analytics (non-PHI)
+model AnalyticsBloodTest {
+  id                    String    @id @default(uuid()) @db.Uuid
+  bloodTestId           String    @unique @map("blood_test_id") @db.Uuid // Reference only
+  
+  // Context
+  panelType             String    @map("panel_type")
+  labPartnerCode        String?   @map("lab_partner_code")
+  region                String?
+  
+  // Aggregated biomarker flags (not values)
+  biomarkerFlags        Json      @map("biomarker_flags") @db.JsonB
+  // Structure: { "TESTOSTERONE": "low", "VITAMIN_D": "normal", "TSH": "high" }
+  
+  abnormalCount         Int       @map("abnormal_count")
+  totalBiomarkers       Int       @map("total_biomarkers")
+  
+  // Demographics for cross-referencing
+  ageBucket             String?   @map("age_bucket")
+  gender                String?
+  
+  // Timestamps
+  resultsReceivedAt     DateTime? @map("results_received_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  @@index([panelType])
+  @@index([labPartnerCode])
+  @@index([ageBucket])
+  @@index([gender])
+  @@index([createdAt])
+  @@map("analytics_blood_tests")
+}
+
+/// Anonymized treatment outcome data for provider benchmarking
+model AnalyticsTreatmentOutcome {
+  id                    String    @id @default(uuid()) @db.Uuid
+  handoffId             String    @unique @map("handoff_id") @db.Uuid // Reference only
+  
+  // Provider & Treatment (not user-identifiable)
+  providerId            String    @map("provider_id") @db.Uuid
+  treatmentId           String    @map("treatment_id") @db.Uuid
+  treatmentCategory     String    @map("treatment_category")
+  
+  // Outcome tracking
+  handoffStatus         String    @map("handoff_status")
+  convertedToTreatment  Boolean   @map("converted_to_treatment")
+  subscriptionActive    Boolean?  @map("subscription_active")
+  
+  // Time metrics
+  daysToConversion      Int?      @map("days_to_conversion")
+  subscriptionMonths    Int?      @map("subscription_months")
+  
+  // Revenue (anonymized amounts not tied to user)
+  revenueGenerated      Decimal?  @map("revenue_generated") @db.Decimal(10, 2)
+  commissionGenerated   Decimal?  @map("commission_generated") @db.Decimal(10, 2)
+  
+  // Demographics for segmentation
+  ageBucket             String?   @map("age_bucket")
+  gender                String?
+  region                String?
+  
+  // Timestamps
+  handoffInitiatedAt    DateTime  @map("handoff_initiated_at")
+  lastUpdatedAt         DateTime  @map("last_updated_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  @@index([providerId])
+  @@index([treatmentId])
+  @@index([treatmentCategory])
+  @@index([handoffStatus])
+  @@index([convertedToTreatment])
+  @@index([createdAt])
+  @@map("analytics_treatment_outcomes")
+}
+
+/// Aggregate provider performance metrics (daily snapshots)
+model ProviderAnalyticsSnapshot {
+  id                    String    @id @default(uuid()) @db.Uuid
+  providerId            String    @map("provider_id") @db.Uuid
+  snapshotDate          DateTime  @map("snapshot_date") @db.Date
+  
+  // Conversion metrics
+  totalHandoffs         Int       @map("total_handoffs")
+  convertedHandoffs     Int       @map("converted_handoffs")
+  conversionRate        Decimal   @map("conversion_rate") @db.Decimal(5, 4)
+  
+  // Retention metrics
+  activeSubscriptions   Int       @map("active_subscriptions")
+  churnedSubscriptions  Int       @map("churned_subscriptions")
+  retentionRate         Decimal?  @map("retention_rate") @db.Decimal(5, 4)
+  
+  // Revenue metrics
+  totalRevenue          Decimal   @map("total_revenue") @db.Decimal(12, 2)
+  totalCommission       Decimal   @map("total_commission") @db.Decimal(12, 2)
+  avgRevenuePerHandoff  Decimal?  @map("avg_revenue_per_handoff") @db.Decimal(10, 2)
+  
+  // Comparison to market (percentile ranks)
+  conversionRank        Int?      @map("conversion_rank") // 1-100 percentile
+  retentionRank         Int?      @map("retention_rank")
+  revenueRank           Int?      @map("revenue_rank")
+  
+  createdAt             DateTime  @default(now()) @map("created_at")
+
+  @@unique([providerId, snapshotDate])
+  @@index([providerId])
+  @@index([snapshotDate])
+  @@map("provider_analytics_snapshots")
+}
+
+// ============================================
+// SUPPLEMENTS (Non-Provider Treatments)
+// ============================================
+
+/// Category for supplements
+enum SupplementCategory {
+  VITAMIN
+  MINERAL
+  HERB
+  AMINO_ACID
+  PROBIOTIC
+  OMEGA
+  ENZYME
+  ADAPTOGEN
+  LIFESTYLE_CHANGE
+  OTHER
+}
+
+/// Supplements - generic products not tied to a specific provider
+/// Can be recommended without provider involvement
+model Supplement {
+  id                String              @id @default(uuid()) @db.Uuid
+  name              String
+  slug              String              @unique
+  description       String?             @db.Text
+  category          SupplementCategory
+  
+  // Evidence and safety
+  evidenceLevel     String?             @map("evidence_level") // strong, moderate, weak, anecdotal
+  primaryBenefits   String[]            @map("primary_benefits")
+  
+  // Dosage info
+  recommendedDosage String?             @map("recommended_dosage")
+  dosageUnit        String?             @map("dosage_unit")
+  frequency         String?             // daily, twice_daily, weekly, etc.
+  
+  // Target health areas
+  targetSymptoms    String[]            @map("target_symptoms")
+  targetGoals       String[]            @map("target_goals")
+  targetBiomarkers  String[]            @map("target_biomarkers") // biomarker codes this helps with
+  
+  // Eligibility/Safety
+  minAge            Int?                @map("min_age")
+  maxAge            Int?                @map("max_age")
+  allowedGenders    Gender[]            @map("allowed_genders")
+  contraindications String[]            // e.g., ["pregnancy", "blood_thinners"]
+  interactions      String[]            // drug/supplement interactions
+  sideEffects       String[]            @map("side_effects")
+  safetyNotes       String?             @map("safety_notes") @db.Text
+  
+  // Affiliate/Purchase info
+  affiliateLinks    Json?               @map("affiliate_links") // {amazon: url, iherb: url, etc.}
+  averagePrice      Decimal?            @map("average_price") @db.Decimal(10, 2)
+  currency          String              @default("GBP")
+  
+  isActive          Boolean             @default(true) @map("is_active")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  // Relations
+  supplementMatches SupplementMatch[]
+
+  @@index([category])
+  @@index([slug])
+  @@index([isActive])
+  @@index([targetSymptoms])
+  @@index([targetGoals])
+  @@map("supplements")
+}
+
+/// Match between recommendation and supplement
+model SupplementMatch {
+  id               String          @id @default(uuid()) @db.Uuid
+  recommendationId String          @map("recommendation_id") @db.Uuid
+  supplementId     String          @map("supplement_id") @db.Uuid
+  matchScore       Int             @map("match_score") // 0-100
+  matchReason      String?         @map("match_reason") @db.Text
+
+  // Priority within recommendation (1 = highest)
+  priority         Int             @default(1)
+
+  // AI-generated personalization
+  personalizedDosage String?       @map("personalized_dosage")
+  expectedBenefit    String?       @map("expected_benefit") @db.Text
+
+  // Tracking
+  status           String          @default("SUGGESTED") // SUGGESTED, VIEWED, PURCHASED, DISMISSED
+  viewedAt         DateTime?       @map("viewed_at")
+  purchasedAt      DateTime?       @map("purchased_at")
+  affiliateClicked Boolean         @default(false) @map("affiliate_clicked")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  recommendation   Recommendation  @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+  supplement       Supplement      @relation(fields: [supplementId], references: [id])
+
+  @@unique([recommendationId, supplementId])
+  @@index([recommendationId])
+  @@index([supplementId])
+  @@index([status])
+  @@map("supplement_matches")
+}
+
+// ============================================
+// FEEDBACK & RATING SYSTEM
+// ============================================
+
+enum ProviderRatingCategory {
+  OVERALL
+  COMMUNICATION
+  PROFESSIONALISM
+  RESULTS
+  VALUE_FOR_MONEY
+}
+
+enum TreatmentFeedbackOutcome {
+  EXCELLENT
+  GOOD
+  NEUTRAL
+  DISAPPOINTING
+  POOR
+}
+
+/// Provider ratings from users
+model ProviderRating {
+  id                String                @id @default(uuid()) @db.Uuid
+  userId            String                @map("user_id") @db.Uuid
+  providerId        String                @map("provider_id") @db.Uuid
+  handoffId         String?               @map("handoff_id") @db.Uuid
+  category          ProviderRatingCategory @default(OVERALL)
+  rating            Int
+  reviewTitle       String?               @map("review_title")
+  reviewText        String?               @map("review_text") @db.Text
+  wouldRecommend    Boolean?              @map("would_recommend")
+  isVerified        Boolean               @default(false) @map("is_verified")
+  isPublic          Boolean               @default(true) @map("is_public")
+  helpfulCount      Int                   @default(0) @map("helpful_count")
+  reportedCount     Int                   @default(0) @map("reported_count")
+  moderationStatus  String                @default("APPROVED") @map("moderation_status")
+  moderatedAt       DateTime?             @map("moderated_at")
+  moderatedBy       String?               @map("moderated_by")
+  createdAt         DateTime              @default(now()) @map("created_at")
+  updatedAt         DateTime              @updatedAt @map("updated_at")
+
+  // Relations
+  user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          Provider              @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  handoff           ProviderHandoff?      @relation(fields: [handoffId], references: [id])
+
+  @@index([userId])
+  @@index([providerId])
+  @@index([handoffId])
+  @@index([category])
+  @@index([rating])
+  @@index([createdAt])
+  @@index([moderationStatus, isPublic])
+  @@map("provider_ratings")
+}
+
+/// Treatment feedback from users
+model TreatmentFeedback {
+  id                    String                @id @default(uuid()) @db.Uuid
+  userId                String                @map("user_id") @db.Uuid
+  treatmentId           String                @map("treatment_id") @db.Uuid
+  providerId            String                @map("provider_id") @db.Uuid
+  handoffId             String?               @map("handoff_id") @db.Uuid
+  outcome               TreatmentFeedbackOutcome
+  effectivenessRating   Int?                  @map("effectiveness_rating")
+  sideEffectsRating     Int?                  @map("side_effects_rating")
+  easeOfUseRating       Int?                  @map("ease_of_use_rating")
+  feedbackText          String?               @map("feedback_text") @db.Text
+  symptomsImproved      String[]              @map("symptoms_improved")
+  symptomsUnchanged     String[]              @map("symptoms_unchanged")
+  symptomsWorsened      String[]              @map("symptoms_worsened")
+  sideEffectsExperienced String[]             @map("side_effects_experienced")
+  durationWeeks         Int?                  @map("duration_weeks")
+  wouldContinue         Boolean?              @map("would_continue")
+  wouldRecommend        Boolean?              @map("would_recommend")
+  isAnonymous           Boolean               @default(true) @map("is_anonymous")
+  isPublic              Boolean               @default(false) @map("is_public")
+  moderationStatus      String                @default("PENDING") @map("moderation_status")
+  moderatedAt           DateTime?             @map("moderated_at")
+  moderatedBy           String?               @map("moderated_by")
+  createdAt             DateTime              @default(now()) @map("created_at")
+  updatedAt             DateTime              @updatedAt @map("updated_at")
+
+  // Relations
+  user                  User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  treatment             Treatment             @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+  provider              Provider              @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  handoff               ProviderHandoff?      @relation(fields: [handoffId], references: [id])
+
+  @@index([userId])
+  @@index([treatmentId])
+  @@index([providerId])
+  @@index([handoffId])
+  @@index([outcome])
+  @@index([createdAt])
+  @@index([moderationStatus, isPublic])
+  @@map("treatment_feedback")
+}
+
+/// Provider rating summary (materialized view equivalent)
+model ProviderRatingSummary {
+  id                    String    @id @default(uuid()) @db.Uuid
+  providerId            String    @unique @map("provider_id") @db.Uuid
+  overallRating         Decimal   @default(0) @map("overall_rating") @db.Decimal(3, 2)
+  communicationRating   Decimal?  @map("communication_rating") @db.Decimal(3, 2)
+  professionalismRating Decimal?  @map("professionalism_rating") @db.Decimal(3, 2)
+  resultsRating         Decimal?  @map("results_rating") @db.Decimal(3, 2)
+  valueRating           Decimal?  @map("value_rating") @db.Decimal(3, 2)
+  totalReviews          Int       @default(0) @map("total_reviews")
+  fiveStarCount         Int       @default(0) @map("five_star_count")
+  fourStarCount         Int       @default(0) @map("four_star_count")
+  threeStarCount        Int       @default(0) @map("three_star_count")
+  twoStarCount          Int       @default(0) @map("two_star_count")
+  oneStarCount          Int       @default(0) @map("one_star_count")
+  recommendationRate    Decimal?  @map("recommendation_rate") @db.Decimal(5, 4)
+  lastCalculatedAt      DateTime  @default(now()) @map("last_calculated_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  provider              Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([providerId])
+  @@map("provider_rating_summaries")
+}
+
+/// Treatment feedback summary (materialized view equivalent)
+model TreatmentFeedbackSummary {
+  id                  String    @id @default(uuid()) @db.Uuid
+  treatmentId         String    @unique @map("treatment_id") @db.Uuid
+  providerId          String    @map("provider_id") @db.Uuid
+  avgEffectiveness    Decimal?  @map("avg_effectiveness") @db.Decimal(3, 2)
+  avgSideEffects      Decimal?  @map("avg_side_effects") @db.Decimal(3, 2)
+  avgEaseOfUse        Decimal?  @map("avg_ease_of_use") @db.Decimal(3, 2)
+  totalFeedback       Int       @default(0) @map("total_feedback")
+  excellentCount      Int       @default(0) @map("excellent_count")
+  goodCount           Int       @default(0) @map("good_count")
+  neutralCount        Int       @default(0) @map("neutral_count")
+  disappointingCount  Int       @default(0) @map("disappointing_count")
+  poorCount           Int       @default(0) @map("poor_count")
+  continuationRate    Decimal?  @map("continuation_rate") @db.Decimal(5, 4)
+  recommendationRate  Decimal?  @map("recommendation_rate") @db.Decimal(5, 4)
+  commonImprovements  String[]  @map("common_improvements")
+  commonSideEffects   String[]  @map("common_side_effects")
+  lastCalculatedAt    DateTime  @default(now()) @map("last_calculated_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  treatment           Treatment @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+  provider            Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([treatmentId])
+  @@map("treatment_feedback_summaries")
+}
+
