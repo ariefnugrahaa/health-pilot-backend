@@ -28,6 +28,8 @@ import supplementRoutes from './api/routes/supplement.routes.js';
 import providerRatingsRoutes from './api/routes/provider-ratings.routes.js';
 import treatmentFeedbackRoutes from './api/routes/treatment-feedback.routes.js';
 import treatmentRoutes from './api/routes/treatment.routes.js';
+import providerInviteRoutes from './api/routes/provider-invite.routes.js';
+import settingsRoutes from './api/routes/settings.routes.js';
 
 // ============================================
 // Express Application Factory
@@ -149,6 +151,10 @@ export function createApp(): Application {
 
   // Treatment routes
   app.use(`${apiPrefix}/treatments`, treatmentRoutes);
+
+  // Provider invite routes (public onboarding)
+  app.use(`${apiPrefix}/providers/invite`, providerInviteRoutes);
+  app.use(`${apiPrefix}/settings`, settingsRoutes);
 
   // ============================================
   // Error Handling

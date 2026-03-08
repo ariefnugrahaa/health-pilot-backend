@@ -77,7 +77,7 @@ export class BloodTestInterpretationService implements IBloodTestInterpretationS
     logger.info('Generating blood test interpretation', { testId, userId });
 
     // 1. Fetch test with results
-    const test = await prisma.bloodTest.findUnique({
+    const test = await prisma.bloodTest.findFirst({
       where: { id: testId, userId },
       include: {
         biomarkerResults: {
@@ -194,7 +194,7 @@ export class BloodTestInterpretationService implements IBloodTestInterpretationS
     userId: string
   ): Promise<BloodTestInterpretationResult | null> {
     // Verify ownership
-    const test = await prisma.bloodTest.findUnique({
+    const test = await prisma.bloodTest.findFirst({
       where: { id: testId, userId },
       select: { id: true },
     });

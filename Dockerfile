@@ -1,12 +1,20 @@
 # HealthPilot Backend Dockerfile
 # Multi-stage build for production optimization
 
+ARG NPM_FETCH_RETRIES=5
+ARG NPM_FETCH_RETRY_MINTIMEOUT=20000
+ARG NPM_FETCH_RETRY_MAXTIMEOUT=120000
+
 # ============================================
 # Stage 1: Dependencies
 # ============================================
 FROM node:20-alpine AS deps
 
 WORKDIR /app
+
+ARG NPM_FETCH_RETRIES
+ARG NPM_FETCH_RETRY_MINTIMEOUT
+ARG NPM_FETCH_RETRY_MAXTIMEOUT
 
 # Install dependencies for native modules
 RUN apk add --no-cache libc6-compat
@@ -15,7 +23,17 @@ RUN apk add --no-cache libc6-compat
 COPY package.json package-lock.json* ./
 
 # Install dependencies
-RUN npm ci --only=production && npm cache clean --force
+RUN npm config set fetch-retries ${NPM_FETCH_RETRIES} \
+    && npm config set fetch-retry-mintimeout ${NPM_FETCH_RETRY_MINTIMEOUT} \
+    && npm config set fetch-retry-maxtimeout ${NPM_FETCH_RETRY_MAXTIMEOUT} \
+    && i=1 \
+    && until npm ci --omit=dev --no-audit --no-fund; do \
+      if [ "$i" -ge 3 ]; then exit 1; fi; \
+      echo "npm ci failed, retrying ($i/3)..."; \
+      i=$((i + 1)); \
+      sleep 5; \
+    done \
+    && npm cache clean --force
 
 # ============================================
 # Stage 2: Builder
@@ -24,11 +42,24 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
+ARG NPM_FETCH_RETRIES
+ARG NPM_FETCH_RETRY_MINTIMEOUT
+ARG NPM_FETCH_RETRY_MAXTIMEOUT
+
 # Copy package files
 COPY package.json package-lock.json* ./
 
 # Install all dependencies (including dev)
-RUN npm ci
+RUN npm config set fetch-retries ${NPM_FETCH_RETRIES} \
+    && npm config set fetch-retry-mintimeout ${NPM_FETCH_RETRY_MINTIMEOUT} \
+    && npm config set fetch-retry-maxtimeout ${NPM_FETCH_RETRY_MAXTIMEOUT} \
+    && i=1 \
+    && until npm ci --no-audit --no-fund; do \
+      if [ "$i" -ge 3 ]; then exit 1; fi; \
+      echo "npm ci failed, retrying ($i/3)..."; \
+      i=$((i + 1)); \
+      sleep 5; \
+    done
 
 # Copy source code
 COPY . .
@@ -46,6 +77,10 @@ FROM node:20-alpine AS dev
 
 WORKDIR /app
 
+ARG NPM_FETCH_RETRIES
+ARG NPM_FETCH_RETRY_MINTIMEOUT
+ARG NPM_FETCH_RETRY_MAXTIMEOUT
+
 # Install dependencies for native modules
 RUN apk add --no-cache libc6-compat
 
@@ -56,7 +91,16 @@ ENV NODE_ENV=development
 COPY package.json package-lock.json* ./
 
 # Install ALL dependencies (including devDependencies like tsx)
-RUN npm ci
+RUN npm config set fetch-retries ${NPM_FETCH_RETRIES} \
+    && npm config set fetch-retry-mintimeout ${NPM_FETCH_RETRY_MINTIMEOUT} \
+    && npm config set fetch-retry-maxtimeout ${NPM_FETCH_RETRY_MAXTIMEOUT} \
+    && i=1 \
+    && until npm ci --no-audit --no-fund; do \
+      if [ "$i" -ge 3 ]; then exit 1; fi; \
+      echo "npm ci failed, retrying ($i/3)..."; \
+      i=$((i + 1)); \
+      sleep 5; \
+    done
 
 # Copy source code
 COPY . .

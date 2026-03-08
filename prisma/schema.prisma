@@ -174,10 +174,14 @@ model User {
   notifications     Notification[]
   providerRatings   ProviderRating[]
   treatmentFeedback TreatmentFeedback[]
+  labBookings       LabBooking[]
   
   // Intake Flow relations
   createdIntakeFlows   IntakeFlow[] @relation("IntakeFlowCreator")
   updatedIntakeFlows   IntakeFlow[] @relation("IntakeFlowUpdater")
+
+  // Provider Invite relations
+  createdProviderInvites ProviderInvite[]
 
   @@index([email])
   @@index([status])
@@ -344,19 +348,73 @@ model Biomarker {
   @@map("biomarkers")
 }
 
-/// Lab partners for blood testing
-model LabPartner {
+/// Physical lab locations for blood testing
+model Lab {
+  id                String    @id @default(uuid()) @db.Uuid
+  name              String
+  city              String
+  state             String
+  address           String?
+  serviceTypes      String[]  @map("service_types") // ["HOME_VISIT", "ON_SITE"]
+  resultTimeDays    Int       @map("result_time_days") // 1-2 days, 3-5 days, etc.
+  isActive          Boolean   @default(true) @map("is_active")
+
+  // Schedule Configuration (stored as JSON)
+  operatingDays     Json      @map("operating_days") @db.Json // [{day: "MONDAY", capacity: 5, timeSlots: [{start: "09:00", end: "12:00"}]}]
+
+  // Booking Rules
+  autoConfirmBooking    Boolean   @default(true) @map("auto_confirm_booking")
+  allowReschedule       Boolean   @default(true) @map("allow_reschedule")
+  cancellationWindowHours Int?    @map("cancellation_window_hours") // 24 hours before appointment
+  requireManualConfirmation Boolean @default(false) @map("require_manual_confirmation")
+
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  bookings          LabBooking[]
+
+  @@map("labs")
+}
+
+/// Lab bookings/appointments
+model LabBooking {
   id              String    @id @default(uuid()) @db.Uuid
-  name            String
-  code            String    @unique
-  apiEndpoint     String?   @map("api_endpoint")
-  isActive        Boolean   @default(true) @map("is_active")
-  supportedRegions String[] @map("supported_regions")
+  labId           String    @map("lab_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  bloodTestId     String?   @map("blood_test_id") @db.Uuid
+  bookingDate     DateTime  @map("booking_date")
+  timeSlot        String    @map("time_slot")
+  status          String    @default("PENDING") // PENDING, CONFIRMED, COMPLETED, CANCELLED
+  adminNotes      String?   @map("admin_notes") @db.Text
+  resultFileName  String?   @map("result_file_name")
+  resultFileType  String?   @map("result_file_type")
+  resultUploadedAt DateTime? @map("result_uploaded_at")
+  resultReviewed  Boolean   @default(false) @map("result_reviewed")
+  reviewedAt      DateTime? @map("reviewed_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  bloodTests      BloodTest[]
+  lab             Lab       @relation(fields: [labId], references: [id])
+  user           User       @relation(fields: [userId], references: [id])
+
+  @@map("lab_bookings")
+}
+
+/// Lab partners for blood testing (API integrations)
+model LabPartner {
+  id               String    @id @default(uuid()) @db.Uuid
+  name             String
+  code             String    @unique
+  apiEndpoint      String?   @map("api_endpoint")
+  isActive         Boolean   @default(true) @map("is_active")
+  supportedRegions String[]  @map("supported_regions")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  bloodTests       BloodTest[]
 
   @@map("lab_partners")
 }
@@ -436,25 +494,31 @@ model Provider {
   logoUrl           String?         @map("logo_url")
   websiteUrl        String?         @map("website_url")
   status            ProviderStatus  @default(PENDING_APPROVAL)
-  
+
   // Business details
+  businessName      String?         @map("business_name")
+  providerType      String?         @map("provider_type") // Individual, Clinic, Hospital, Telehealth, Laboratory
+  contactEmail      String?         @map("contact_email")
+  contactPhone      String?         @map("contact_phone")
   registrationNumber String?        @map("registration_number")
   supportedRegions  String[]        @map("supported_regions")
-  
+
   // Integration
   apiEndpoint       String?         @map("api_endpoint")
   webhookUrl        String?         @map("webhook_url")
   acceptsBloodTests Boolean         @default(true) @map("accepts_blood_tests")
-  
+
   // Commercial terms
+  affiliateLink     String?         @map("affiliate_link")
   commissionRate    Decimal?        @map("commission_rate") @db.Decimal(5, 4)
   subscriptionShare Decimal?        @map("subscription_share") @db.Decimal(5, 4)
-  
+
   createdAt         DateTime        @default(now()) @map("created_at")
   updatedAt         DateTime        @updatedAt @map("updated_at")
 
   // Relations
-  treatments        Treatment[]
+  treatments        Treatment[] // Deprecated: Use treatmentProviders instead
+  treatmentProviders TreatmentProvider[]
   providerHandoffs  ProviderHandoff[]
   providerAdmins    ProviderAdmin[]
   webhooks          ProviderWebhook[]
@@ -462,10 +526,38 @@ model Provider {
   treatmentFeedback TreatmentFeedback[]
   providerRatingSummary ProviderRatingSummary?
   treatmentFeedbackSummaries TreatmentFeedbackSummary[]
+  invites               ProviderInvite[]
 
   @@index([slug])
   @@index([status])
   @@map("providers")
+}
+
+/// Provider invitation tokens for onboarding
+model ProviderInvite {
+  id          String      @id @default(uuid()) @db.Uuid
+  email       String?
+  token       String      @unique
+  expiresAt   DateTime    @map("expires_at")
+  usedAt      DateTime?   @map("used_at")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  createdById String?     @map("created_by_id") @db.Uuid
+
+  // Link settings
+  isReusable  Boolean     @default(false) @map("is_reusable")
+  notes       String?     @db.Text
+
+  // Provider created from this invite (after onboarding submission)
+  providerId  String?     @map("provider_id") @db.Uuid
+
+  // Relations
+  provider    Provider?   @relation(fields: [providerId], references: [id], onDelete: SetNull)
+  createdBy   User?       @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([token])
+  @@index([email])
+  @@index([expiresAt])
+  @@map("provider_invites")
 }
 
 /// Provider admin users
@@ -488,33 +580,44 @@ model ProviderAdmin {
 /// Treatment definitions
 model Treatment {
   id                String            @id @default(uuid()) @db.Uuid
-  providerId        String            @map("provider_id") @db.Uuid
+  providerId        String?           @map("provider_id") @db.Uuid // Deprecated: Use treatmentProviders instead
   name              String
   slug              String            @unique
   description       String?           @db.Text
   category          TreatmentCategory
-  
+
   // Capabilities
   supportedCategories String?         @map("supported_categories") @db.Text
-  
+
+  // Recommendation Settings
+  includeInMatching   Boolean         @default(true) @map("include_in_matching")
+  forceRankingOverride String?        @map("force_ranking_override") // Best Match, High Priority, Low Priority
+
+  // Solution Properties
+  requiresBloodTest Boolean           @default(false) @map("requires_blood_test")
+  injectionBased     Boolean          @default(false) @map("injection_based")
+  prescriptionRequired Boolean        @default(false) @map("prescription_required")
+
+  // Eligibility Overview
+  requiresBiomarkers Boolean          @default(false) @map("requires_biomarkers")
+  minAge            Int?              @map("min_age")
+  maxAge            Int?              @map("max_age")
+  allowedGenders    Gender[]          @map("allowed_genders")
+  additionalNotes   String?           @map("additional_notes") @db.Text
+
   // Pricing
   priceOneTime      Decimal?          @map("price_one_time") @db.Decimal(10, 2)
   priceSubscription Decimal?          @map("price_subscription") @db.Decimal(10, 2)
   subscriptionFrequency String?       @map("subscription_frequency") // monthly, quarterly, etc.
   currency          String            @default("GBP")
-  
-  // Eligibility
-  minAge            Int?              @map("min_age")
-  maxAge            Int?              @map("max_age")
-  allowedGenders    Gender[]          @map("allowed_genders")
-  requiresBloodTest Boolean           @default(false) @map("requires_blood_test")
-  
+
   isActive          Boolean           @default(true) @map("is_active")
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @updatedAt @map("updated_at")
 
   // Relations
-  provider          Provider          @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  provider          Provider?         @relation(fields: [providerId], references: [id], onDelete: Cascade) // Deprecated
+  treatmentProviders TreatmentProvider[]
   treatmentMatches  TreatmentMatch[]
   matchingRules     MatchingRule[]
   treatmentBiomarkers TreatmentBiomarker[]
@@ -526,6 +629,24 @@ model Treatment {
   @@index([category])
   @@index([slug])
   @@map("treatments")
+}
+
+/// Junction table for many-to-many Treatment-Provider relationship
+model TreatmentProvider {
+  id          String    @id @default(uuid()) @db.Uuid
+  treatmentId String    @map("treatment_id") @db.Uuid
+  providerId  String    @map("provider_id") @db.Uuid
+  isPrimary   Boolean   @default(false) @map("is_primary") // Mark primary provider
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  treatment   Treatment @relation(fields: [treatmentId], references: [id], onDelete: Cascade)
+  provider    Provider  @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([treatmentId, providerId])
+  @@index([treatmentId])
+  @@index([providerId])
+  @@map("treatment_providers")
 }
 
 /// Required biomarkers for treatments
@@ -727,6 +848,7 @@ model IntakeFlow {
   // Configuration
   isDefault         Boolean           @default(false) @map("is_default")
   assignedTo        String?           @map("assigned_to") // User or group who manages this flow
+  scoringConfig     Json?             @map("scoring_config")
   
   // Metadata
   createdById       String            @map("created_by_id") @db.Uuid
@@ -1326,3 +1448,19 @@ model TreatmentFeedbackSummary {
   @@map("treatment_feedback_summaries")
 }
 
+// ============================================
+// PLATFORM SETTINGS
+// ============================================
+
+/// Platform settings - stores configuration as JSON
+model PlatformSetting {
+  id          String    @id @default(uuid()) @db.Uuid
+  key         String    @unique // e.g., "landing_page", "legal", "system"
+  value       Json      // JSON object containing the settings
+  description String?   @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([key])
+  @@map("platform_settings")
+}

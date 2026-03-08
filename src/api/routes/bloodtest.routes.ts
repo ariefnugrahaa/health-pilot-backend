@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction, Router } from 'express';
-import { body } from 'express-validator';
+import { body, validationResult } from 'express-validator';
 import { prisma } from '../../utils/database.js';
 import { asyncHandler } from '../middlewares/error.middleware.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
@@ -100,6 +100,18 @@ router.post(
       .withMessage('Invalid panel type'),
   ],
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: errors.array()[0]?.msg ?? 'Invalid request payload',
+        },
+      });
+      return;
+    }
+
     const userId = req.user?.userId;
     const { panelType } = (req as AuthenticatedRequest & { body: { panelType: string } }).body;
 
@@ -133,6 +145,130 @@ router.get(
 );
 
 /**
+ * GET /blood-tests/order-options
+ * Public booking options derived from admin labs + system settings
+ */
+router.get(
+  '/order-options',
+  asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
+    const orderOptions = await bloodTestService.listOrderOptions();
+
+    res.status(200).json({
+      success: true,
+      data: orderOptions,
+      meta: { timestamp: new Date().toISOString() },
+    });
+  })
+);
+
+/**
+ * POST /blood-tests/orders
+ * Create a booked blood test order and attach deterministic demo results
+ */
+router.post(
+  '/orders',
+  authenticate,
+  [
+    body('labId').isUUID().withMessage('Invalid lab id'),
+    body('bookingDate').isISO8601().withMessage('Invalid booking date'),
+    body('timeSlotId').isString().notEmpty().withMessage('Time slot is required'),
+    body('panelType')
+      .optional()
+      .isIn(['targeted', 'goal-based', 'comprehensive'])
+      .withMessage('Invalid panel type'),
+  ],
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: errors.array()[0]?.msg ?? 'Invalid request payload',
+        },
+      });
+      return;
+    }
+
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new Error('User not found');
+    }
+
+    const { labId, bookingDate, timeSlotId, panelType } = req.body as {
+      labId: string;
+      bookingDate: string;
+      timeSlotId: string;
+      panelType?: string;
+    };
+
+    const booking = await bloodTestService.createDemoBooking(userId, {
+      labId,
+      bookingDate: bookingDate.slice(0, 10),
+      timeSlotId,
+      ...(panelType ? { panelType } : {}),
+    });
+
+    res.status(201).json({
+      success: true,
+      data: booking,
+      meta: { timestamp: new Date().toISOString() },
+    });
+  })
+);
+
+/**
+ * POST /blood-tests/uploads
+ * Create a completed blood test from the customer upload flow
+ */
+router.post(
+  '/uploads',
+  authenticate,
+  [
+    body('fileNames').isArray({ min: 1 }).withMessage('At least one uploaded file is required'),
+    body('fileNames.*').isString().notEmpty().withMessage('Uploaded file name is required'),
+    body('panelType')
+      .optional()
+      .isIn(['targeted', 'goal-based', 'comprehensive'])
+      .withMessage('Invalid panel type'),
+  ],
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: errors.array()[0]?.msg ?? 'Invalid request payload',
+        },
+      });
+      return;
+    }
+
+    const userId = req.user?.userId;
+    if (!userId) {
+      throw new Error('User not found');
+    }
+
+    const { fileNames, panelType } = req.body as {
+      fileNames: string[];
+      panelType?: string;
+    };
+
+    const uploadResult = await bloodTestService.createUploadedResult(userId, {
+      fileNames,
+      ...(panelType ? { panelType } : {}),
+    });
+
+    res.status(201).json({
+      success: true,
+      data: uploadResult,
+      meta: { timestamp: new Date().toISOString() },
+    });
+  })
+);
+
+/**
  * GET /blood-tests/:testId
  */
 router.get(
@@ -151,6 +287,32 @@ router.get(
     res.status(200).json({
       success: true,
       data: test,
+      meta: { timestamp: new Date().toISOString() },
+    });
+  })
+);
+
+/**
+ * GET /blood-tests/:testId/report
+ * Return a structured report for the customer results UI
+ */
+router.get(
+  '/:testId/report',
+  authenticate,
+  auditPhiAccess('blood_test'),
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const userId = req.user?.userId;
+    const { testId } = req.params as { testId: string };
+
+    if (!userId) {
+      throw new Error('User not found');
+    }
+
+    const report = await bloodTestService.getReport(testId, userId);
+
+    res.status(200).json({
+      success: true,
+      data: report,
       meta: { timestamp: new Date().toISOString() },
     });
   })

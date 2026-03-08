@@ -22,7 +22,17 @@ const router = Router();
 // ============================================
 
 const createTreatmentValidation = [
-  body('providerId').isUUID().withMessage('Provider ID must be a valid UUID'),
+  body('providerId').optional().isUUID().withMessage('Provider ID must be a valid UUID (deprecated, use providerIds)'),
+  body('providerIds')
+    .optional()
+    .isArray({ min: 1 })
+    .withMessage('Provider IDs must be a non-empty array of UUIDs')
+    .custom((value) => {
+      if (value && !value.every((id: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))) {
+        throw new Error('All provider IDs must be valid UUIDs');
+      }
+      return true;
+    }),
   body('name').isString().notEmpty().withMessage('Name is required'),
   body('slug')
     .isString()
@@ -103,6 +113,13 @@ router.get(
         provider: {
           select: { id: true, name: true, slug: true },
         },
+        treatmentProviders: {
+          include: {
+            provider: {
+              select: { id: true, name: true, slug: true, status: true },
+            },
+          },
+        },
         treatmentBiomarkers: {
           include: { biomarker: true },
         },
@@ -144,6 +161,13 @@ router.get(
       where: { id: treatmentId },
       include: {
         provider: true,
+        treatmentProviders: {
+          include: {
+            provider: {
+              select: { id: true, name: true, slug: true, status: true, supportedRegions: true },
+            },
+          },
+        },
         treatmentBiomarkers: {
           include: { biomarker: true },
         },
@@ -193,7 +217,8 @@ router.post(
     }
 
     const {
-      providerId,
+      providerId, // Deprecated: for backward compatibility
+      providerIds,
       name,
       slug,
       description,
@@ -207,7 +232,8 @@ router.post(
       allowedGenders,
       requiresBloodTest = false,
     } = req.body as {
-      providerId: string;
+      providerId?: string;
+      providerIds?: string[];
       name: string;
       slug: string;
       description?: string;
@@ -222,13 +248,27 @@ router.post(
       requiresBloodTest?: boolean;
     };
 
-    // Check provider exists
-    const provider = await prisma.provider.findUnique({
-      where: { id: providerId },
+    // Determine which providers to link
+    // Use providerIds array if provided, otherwise fall back to single providerId for backward compatibility
+    const providersToLink = providerIds && providerIds.length > 0
+      ? providerIds
+      : providerId
+        ? [providerId]
+        : [];
+
+    if (providersToLink.length === 0) {
+      throw new ValidationError('At least one provider must be specified (use providerIds array or providerId)');
+    }
+
+    // Check all providers exist
+    const providers = await prisma.provider.findMany({
+      where: { id: { in: providersToLink } },
     });
 
-    if (!provider) {
-      throw new NotFoundError('Provider');
+    if (providers.length !== providersToLink.length) {
+      const foundIds = providers.map(p => p.id);
+      const missingIds = providersToLink.filter(id => !foundIds.includes(id));
+      throw new NotFoundError(`Provider(s) with ID(s): ${missingIds.join(', ')}`);
     }
 
     // Check slug is unique
@@ -242,7 +282,7 @@ router.post(
 
     const treatment = await prisma.treatment.create({
       data: {
-        providerId,
+        providerId: providersToLink[0]!, // Keep for backward compatibility - guaranteed to exist
         name,
         slug,
         description: description ?? null,
@@ -256,10 +296,23 @@ router.post(
         allowedGenders: allowedGenders ?? [],
         requiresBloodTest,
         isActive: true,
+        treatmentProviders: {
+          create: providersToLink.map((providerId, index) => ({
+            providerId,
+            isPrimary: index === 0, // First provider is primary
+          })),
+        },
       },
       include: {
         provider: {
           select: { id: true, name: true },
+        },
+        treatmentProviders: {
+          include: {
+            provider: {
+              select: { id: true, name: true, slug: true, status: true },
+            },
+          },
         },
       },
     });
@@ -307,6 +360,7 @@ router.patch(
       allowedGenders,
       requiresBloodTest,
       isActive,
+      providerIds, // New: array of provider IDs to link
     } = req.body;
 
     const updateData: Record<string, unknown> = {};
@@ -347,11 +401,52 @@ router.patch(
       updateData['isActive'] = isActive;
     }
 
+    // Handle provider updates if providerIds is provided
+    if (providerIds !== undefined) {
+      if (!Array.isArray(providerIds) || providerIds.length === 0) {
+        throw new ValidationError('providerIds must be a non-empty array');
+      }
+
+      // Verify all providers exist
+      const providers = await prisma.provider.findMany({
+        where: { id: { in: providerIds } },
+      });
+
+      if (providers.length !== providerIds.length) {
+        const foundIds = providers.map(p => p.id);
+        const missingIds = providerIds.filter(id => !foundIds.includes(id));
+        throw new NotFoundError(`Provider(s) with ID(s): ${missingIds.join(', ')}`);
+      }
+
+      // Update the deprecated providerId field to first provider
+      updateData['providerId'] = providerIds[0];
+
+      // Delete existing treatment-provider links and create new ones
+      await prisma.treatmentProvider.deleteMany({
+        where: { treatmentId },
+      });
+
+      await prisma.treatmentProvider.createMany({
+        data: providerIds.map((providerId, index) => ({
+          treatmentId,
+          providerId,
+          isPrimary: index === 0,
+        })),
+      });
+    }
+
     const treatment = await prisma.treatment.update({
       where: { id: treatmentId },
       data: updateData,
       include: {
         provider: { select: { id: true, name: true } },
+        treatmentProviders: {
+          include: {
+            provider: {
+              select: { id: true, name: true, slug: true, status: true },
+            },
+          },
+        },
       },
     });
 
@@ -658,11 +753,238 @@ router.delete(
 );
 
 // ============================================
+// Treatment Providers Routes (Many-to-Many)
+// ============================================
+
+/**
+ * GET /admin/treatments/:treatmentId/providers
+ * List all providers linked to a treatment
+ */
+router.get(
+  '/:treatmentId/providers',
+  authenticate,
+  requireAdmin,
+  [param('treatmentId').isUUID()],
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const { treatmentId } = req.params as { treatmentId: string };
+
+    const treatmentProviders = await prisma.treatmentProvider.findMany({
+      where: { treatmentId },
+      include: {
+        provider: {
+          select: { id: true, name: true, slug: true, status: true, supportedRegions: true },
+        },
+      },
+      orderBy: { isPrimary: 'desc' },
+    });
+
+    const response: ApiResponse<typeof treatmentProviders> = {
+      success: true,
+      data: treatmentProviders,
+      meta: { timestamp: new Date().toISOString() },
+    };
+
+    res.status(200).json(response);
+  })
+);
+
+/**
+ * POST /admin/treatments/:treatmentId/providers
+ * Add a provider to a treatment
+ */
+router.post(
+  '/:treatmentId/providers',
+  authenticate,
+  requireAdmin,
+  [
+    param('treatmentId').isUUID(),
+    body('providerId').isUUID().withMessage('Provider ID must be a valid UUID'),
+    body('isPrimary').optional().isBoolean(),
+  ],
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ValidationError(
+        'Validation failed',
+        errors.array().map((e) => ({
+          field: 'param' in e ? String(e.param) : 'unknown',
+          message: e.msg as string,
+        }))
+      );
+    }
+
+    const { treatmentId } = req.params as { treatmentId: string };
+    const { providerId, isPrimary = false } = req.body as {
+      providerId: string;
+      isPrimary?: boolean;
+    };
+
+    // Verify treatment exists
+    const treatment = await prisma.treatment.findUnique({
+      where: { id: treatmentId },
+    });
+
+    if (!treatment) {
+      throw new NotFoundError('Treatment');
+    }
+
+    // Verify provider exists
+    const provider = await prisma.provider.findUnique({
+      where: { id: providerId },
+    });
+
+    if (!provider) {
+      throw new NotFoundError('Provider');
+    }
+
+    // Check if already linked
+    const existing = await prisma.treatmentProvider.findUnique({
+      where: {
+        treatmentId_providerId: { treatmentId, providerId },
+      },
+    });
+
+    if (existing) {
+      throw new ValidationError('This provider is already linked to this treatment');
+    }
+
+    // If setting as primary, unset other primaries
+    if (isPrimary) {
+      await prisma.treatmentProvider.updateMany({
+        where: { treatmentId, isPrimary: true },
+        data: { isPrimary: false },
+      });
+    }
+
+    const treatmentProvider = await prisma.treatmentProvider.create({
+      data: {
+        treatmentId,
+        providerId,
+        isPrimary,
+      },
+      include: {
+        provider: {
+          select: { id: true, name: true, slug: true, status: true },
+        },
+      },
+    });
+
+    const response: ApiResponse<typeof treatmentProvider> = {
+      success: true,
+      data: treatmentProvider,
+      meta: { timestamp: new Date().toISOString() },
+    };
+
+    res.status(201).json(response);
+  })
+);
+
+/**
+ * DELETE /admin/treatments/:treatmentId/providers/:providerId
+ * Remove a provider from a treatment
+ */
+router.delete(
+  '/:treatmentId/providers/:providerId',
+  authenticate,
+  requireAdmin,
+  [param('treatmentId').isUUID(), param('providerId').isUUID()],
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const { treatmentId, providerId } = req.params as { treatmentId: string; providerId: string };
+
+    const existing = await prisma.treatmentProvider.findUnique({
+      where: {
+        treatmentId_providerId: { treatmentId, providerId },
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundError('Treatment-provider association');
+    }
+
+    await prisma.treatmentProvider.delete({
+      where: {
+        treatmentId_providerId: { treatmentId, providerId },
+      },
+    });
+
+    res.status(204).send();
+  })
+);
+
+/**
+ * PATCH /admin/treatments/:treatmentId/providers/:providerId
+ * Update a treatment-provider link (e.g., set as primary)
+ */
+router.patch(
+  '/:treatmentId/providers/:providerId',
+  authenticate,
+  requireAdmin,
+  [
+    param('treatmentId').isUUID(),
+    param('providerId').isUUID(),
+    body('isPrimary').isBoolean(),
+  ],
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      throw new ValidationError(
+        'Validation failed',
+        errors.array().map((e) => ({
+          field: 'param' in e ? String(e.param) : 'unknown',
+          message: e.msg as string,
+        }))
+      );
+    }
+
+    const { treatmentId, providerId } = req.params as { treatmentId: string; providerId: string };
+    const { isPrimary } = req.body as { isPrimary: boolean };
+
+    const existing = await prisma.treatmentProvider.findUnique({
+      where: {
+        treatmentId_providerId: { treatmentId, providerId },
+      },
+    });
+
+    if (!existing) {
+      throw new NotFoundError('Treatment-provider association');
+    }
+
+    // If setting as primary, unset other primaries
+    if (isPrimary) {
+      await prisma.treatmentProvider.updateMany({
+        where: { treatmentId, isPrimary: true },
+        data: { isPrimary: false },
+      });
+    }
+
+    const treatmentProvider = await prisma.treatmentProvider.update({
+      where: {
+        treatmentId_providerId: { treatmentId, providerId },
+      },
+      data: { isPrimary },
+      include: {
+        provider: {
+          select: { id: true, name: true, slug: true, status: true },
+        },
+      },
+    });
+
+    const response: ApiResponse<typeof treatmentProvider> = {
+      success: true,
+      data: treatmentProvider,
+      meta: { timestamp: new Date().toISOString() },
+    };
+
+    res.status(200).json(response);
+  })
+);
+
+// ============================================
 // Bulk Import/Export Routes
 // ============================================
 
 /**
- * POST /admin/treatments/:treatmentId/full-setup
+ * POST /admin/treatments/full-setup
  * Create a treatment with all related data in one request
  */
 router.post(
@@ -672,7 +994,8 @@ router.post(
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { treatment, biomarkers, contraindications, matchingRules } = req.body as {
       treatment: {
-        providerId: string;
+        providerId?: string; // Deprecated: use providerIds
+        providerIds?: string[];
         name: string;
         slug: string;
         description?: string;
@@ -709,13 +1032,24 @@ router.post(
       }>;
     };
 
+    // Determine which providers to link
+    const providersToLink = treatment.providerIds && treatment.providerIds.length > 0
+      ? treatment.providerIds
+      : treatment.providerId
+        ? [treatment.providerId]
+        : [];
+
+    if (providersToLink.length === 0) {
+      throw new ValidationError('At least one provider must be specified (use providerIds array or providerId)');
+    }
+
     // Use transaction for all-or-nothing
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = await prisma.$transaction(async (tx: any) => {
       // 1. Create treatment
       const createdTreatment = await tx.treatment.create({
         data: {
-          providerId: treatment.providerId,
+          providerId: providersToLink[0], // Keep for backward compatibility
           name: treatment.name,
           slug: treatment.slug,
           description: treatment.description,
@@ -729,6 +1063,12 @@ router.post(
           allowedGenders: treatment.allowedGenders ?? [],
           requiresBloodTest: treatment.requiresBloodTest ?? false,
           isActive: true,
+          treatmentProviders: {
+            create: providersToLink.map((providerId, index) => ({
+              providerId,
+              isPrimary: index === 0,
+            })),
+          },
         },
       });
 
@@ -789,6 +1129,11 @@ router.post(
       where: { id: result.id },
       include: {
         provider: { select: { id: true, name: true } },
+        treatmentProviders: {
+          include: {
+            provider: { select: { id: true, name: true, slug: true, status: true } },
+          },
+        },
         treatmentBiomarkers: { include: { biomarker: true } },
         contraindications: true,
         matchingRules: true,

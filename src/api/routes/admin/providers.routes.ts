@@ -84,6 +84,7 @@ router.get(
         _count: {
           select: {
             treatments: true,
+            treatmentProviders: true,
             providerHandoffs: true,
             providerAdmins: true,
           },
@@ -119,7 +120,14 @@ router.get(
       include: {
         treatments: {
           where: { isActive: true },
-          select: { id: true, name: true, slug: true, category: true },
+          select: { id: true, name: true, slug: true, category: true, isActive: true },
+        },
+        treatmentProviders: {
+          include: {
+            treatment: {
+              select: { id: true, name: true, slug: true, category: true, isActive: true },
+            },
+          },
         },
         providerAdmins: {
           select: { id: true, email: true, name: true, isActive: true },

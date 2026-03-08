@@ -5,7 +5,7 @@ const prisma = new PrismaClient();
 
 async function createAdminUser() {
   try {
-    console.log('🔐 Creating admin user...');
+    console.log('🔐 Ensuring admin user...');
 
     const email = 'admin@healthpilot.com';
     const password = 'Admin123!';
@@ -16,7 +16,15 @@ async function createAdminUser() {
 
     const admin = await prisma.user.upsert({
       where: { email },
-      update: {},
+      update: {
+        passwordHash: hashedPassword,
+        firstName,
+        lastName,
+        isAnonymous: false,
+        isEmailVerified: true,
+        status: UserStatus.ACTIVE,
+        role: UserRole.SUPER_ADMIN,
+      },
       create: {
         email,
         passwordHash: hashedPassword,
@@ -29,7 +37,7 @@ async function createAdminUser() {
       },
     });
 
-    console.log('✅ Admin user created successfully!');
+    console.log('✅ Admin user is ready.');
     console.log('\n=================================');
     console.log('📋 Admin Login Credentials:');
     console.log('=================================');

@@ -151,7 +151,7 @@ export const config = {
 
   // OpenAI
   openai: {
-    apiKey: "env.OPENAI_API_KEY",
+    apiKey: env.OPENAI_API_KEY,
     model: "gpt-4o",
     visionModel: "gpt-4o",
     maxTokens: 4096,

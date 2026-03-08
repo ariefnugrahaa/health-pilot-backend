@@ -90,13 +90,21 @@ const createIntakeValidation = [
  */
 router.get(
   '/config',
-  asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
-    const activeFlow = await prisma.intakeFlow.findFirst({
-      where: { status: 'ACTIVE' },
-      orderBy: [
-        { isDefault: 'desc' },
-        { updatedAt: 'desc' },
-      ],
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const assignedToParam = req.query.assignedTo;
+    const assignedTo = Array.isArray(assignedToParam) ? assignedToParam[0] : assignedToParam;
+
+    let activeFlow = await prisma.intakeFlow.findFirst({
+      where: {
+        status: 'ACTIVE',
+        ...(assignedTo ? { assignedTo } : {}),
+      },
+      orderBy: assignedTo
+        ? [{ updatedAt: 'desc' }]
+        : [
+            { isDefault: 'desc' },
+            { updatedAt: 'desc' },
+          ],
       include: {
         sections: {
           orderBy: { order: 'asc' },
@@ -108,6 +116,26 @@ router.get(
         },
       },
     });
+
+    if (!activeFlow && assignedTo) {
+      activeFlow = await prisma.intakeFlow.findFirst({
+        where: { assignedTo },
+        orderBy: [
+          { status: 'asc' },
+          { updatedAt: 'desc' },
+        ],
+        include: {
+          sections: {
+            orderBy: { order: 'asc' },
+            include: {
+              fields: {
+                orderBy: { order: 'asc' },
+              },
+            },
+          },
+        },
+      });
+    }
 
     if (!activeFlow || activeFlow.sections.length === 0) {
       throw new NotFoundError('Active intake flow');

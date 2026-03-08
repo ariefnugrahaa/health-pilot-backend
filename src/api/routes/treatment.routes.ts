@@ -167,14 +167,24 @@ router.post(
             description,
             category,
             supportedCategories,
+            // Recommendation Settings
+            includeInMatching,
+            forceRankingOverride,
+            // Solution Properties
+            requiresBloodTest,
+            injectionBased,
+            prescriptionRequired,
+            // Eligibility Overview
+            requiresBiomarkers,
+            minAge,
+            maxAge,
+            allowedGenders,
+            additionalNotes,
+            // Pricing
             priceOneTime,
             priceSubscription,
             subscriptionFrequency,
             currency,
-            minAge,
-            maxAge,
-            allowedGenders,
-            requiresBloodTest,
             isActive,
         } = req.body;
 
@@ -199,17 +209,27 @@ router.post(
                 providerId,
                 name,
                 slug,
-                description,
+                description: description || null,
                 category,
                 supportedCategories: supportedCategories || null,
-                priceOneTime: priceOneTime ? Number(priceOneTime) : null,
-                priceSubscription: priceSubscription ? Number(priceSubscription) : null,
-                subscriptionFrequency,
-                currency: currency || 'GBP',
+                // Recommendation Settings
+                includeInMatching: includeInMatching !== undefined ? includeInMatching : true,
+                forceRankingOverride: forceRankingOverride || null,
+                // Solution Properties
+                requiresBloodTest: requiresBloodTest || false,
+                injectionBased: injectionBased || false,
+                prescriptionRequired: prescriptionRequired || false,
+                // Eligibility Overview
+                requiresBiomarkers: requiresBiomarkers || false,
                 minAge: minAge ? Number(minAge) : null,
                 maxAge: maxAge ? Number(maxAge) : null,
                 allowedGenders: allowedGenders || [],
-                requiresBloodTest: requiresBloodTest || false,
+                additionalNotes: additionalNotes || null,
+                // Pricing
+                priceOneTime: priceOneTime ? Number(priceOneTime) : null,
+                priceSubscription: priceSubscription ? Number(priceSubscription) : null,
+                subscriptionFrequency: subscriptionFrequency || null,
+                currency: currency || 'GBP',
                 isActive: isActive !== undefined ? isActive : true,
             },
         });

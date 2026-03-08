@@ -15,40 +15,37 @@ const TEST_USER = {
   password: 'Test123!',
   firstName: 'Test',
   lastName: 'User',
-  role: 'patient',
 };
 
 async function createTestUser() {
   try {
-    // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email: TEST_USER.email },
-    });
-
-    if (existingUser) {
-      console.log('✅ Test user already exists:');
-      console.log('   Email:', TEST_USER.email);
-      console.log('   Password:', TEST_USER.password);
-      return;
-    }
-
-    // Hash the password
+    // Hash password and enforce known credentials.
     const hashedPassword = await bcrypt.hash(TEST_USER.password, 10);
 
-    // Create the test user
-    const user = await prisma.user.create({
-      data: {
-        email: TEST_USER.email,
-        password: hashedPassword,
+    const user = await prisma.user.upsert({
+      where: { email: TEST_USER.email },
+      update: {
+        passwordHash: hashedPassword,
         firstName: TEST_USER.firstName,
         lastName: TEST_USER.lastName,
-        role: TEST_USER.role as any,
+        role: 'USER',
+        status: 'ACTIVE',
         isAnonymous: false,
-        isVerified: true,
+        isEmailVerified: true,
+      },
+      create: {
+        email: TEST_USER.email,
+        passwordHash: hashedPassword,
+        firstName: TEST_USER.firstName,
+        lastName: TEST_USER.lastName,
+        role: 'USER',
+        status: 'ACTIVE',
+        isAnonymous: false,
+        isEmailVerified: true,
       },
     });
 
-    console.log('✅ Test user created successfully:');
+    console.log('✅ Test user is ready:');
     console.log('   Email:', TEST_USER.email);
     console.log('   Password:', TEST_USER.password);
     console.log('   User ID:', user.id);

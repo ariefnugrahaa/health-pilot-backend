@@ -2,8 +2,11 @@ import { Router, Response } from 'express';
 import { body, param, validationResult } from 'express-validator';
 
 import { intakeFlowService } from '../../../services/intake-flow/intake-flow.service.js';
-import logger from '../../../utils/logger.js';
-import { asyncHandler, ValidationError, NotFoundError } from '../../middlewares/error.middleware.js';
+import {
+  asyncHandler,
+  ValidationError,
+  NotFoundError,
+} from '../../middlewares/error.middleware.js';
 import { authenticate } from '../../middlewares/auth.middleware.js';
 import type { ApiResponse, AuthenticatedRequest } from '../../../types/index.js';
 
@@ -35,6 +38,44 @@ const validateFieldOptionsForType = (typeRaw: unknown, options: unknown): void =
   }
 };
 
+const validateScoringConfig = (value: unknown): boolean => {
+  if (value === undefined || value === null) {
+    return true;
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('Scoring config must be an object');
+  }
+
+  const typedValue = value as Record<string, unknown>;
+
+  if (typedValue.domains !== undefined && !Array.isArray(typedValue.domains)) {
+    throw new Error('Scoring domains must be an array');
+  }
+
+  if (typedValue.riskBuckets !== undefined && !Array.isArray(typedValue.riskBuckets)) {
+    throw new Error('Risk buckets must be an array');
+  }
+
+  if (typedValue.bloodMarkerRules !== undefined && !Array.isArray(typedValue.bloodMarkerRules)) {
+    throw new Error('Blood marker rules must be an array');
+  }
+
+  if (typedValue.rules !== undefined && !Array.isArray(typedValue.rules)) {
+    throw new Error('Rules must be an array');
+  }
+
+  if (
+    typedValue.outputMapping !== undefined &&
+    typedValue.outputMapping !== null &&
+    typeof typedValue.outputMapping !== 'object'
+  ) {
+    throw new Error('Output mapping must be an object');
+  }
+
+  return true;
+};
+
 // ============================================
 // Validation Rules
 // ============================================
@@ -43,6 +84,7 @@ const createIntakeFlowValidation = [
   body('name').isString().trim().isLength({ min: 1, max: 255 }).withMessage('Name is required'),
   body('description').optional().isString().trim().isLength({ max: 2000 }),
   body('assignedTo').optional().isString(),
+  body('scoringConfig').optional({ nullable: true }).custom(validateScoringConfig),
 ];
 
 const updateIntakeFlowValidation = [
@@ -51,6 +93,7 @@ const updateIntakeFlowValidation = [
   body('status').optional().isIn(['DRAFT', 'ACTIVE', 'INACTIVE', 'ARCHIVED']),
   body('assignedTo').optional().isString(),
   body('isDefault').optional().isBoolean(),
+  body('scoringConfig').optional({ nullable: true }).custom(validateScoringConfig),
 ];
 
 const createSectionValidation = [
@@ -63,9 +106,25 @@ const createSectionValidation = [
 
 const createFieldValidation = [
   body('sectionId').isUUID().withMessage('Valid section ID is required'),
-  body('fieldKey').isString().trim().isLength({ min: 1, max: 100 }).withMessage('Field key is required'),
+  body('fieldKey')
+    .isString()
+    .trim()
+    .isLength({ min: 1, max: 100 })
+    .withMessage('Field key is required'),
   body('label').isString().trim().isLength({ min: 1, max: 255 }).withMessage('Label is required'),
-  body('type').isIn(['TEXT', 'NUMBER', 'EMAIL', 'DATE', 'SELECT', 'MULTI_SELECT', 'RADIO', 'CHECKBOX', 'TEXTAREA', 'PHONE', 'BOOLEAN']),
+  body('type').isIn([
+    'TEXT',
+    'NUMBER',
+    'EMAIL',
+    'DATE',
+    'SELECT',
+    'MULTI_SELECT',
+    'RADIO',
+    'CHECKBOX',
+    'TEXTAREA',
+    'PHONE',
+    'BOOLEAN',
+  ]),
   body('placeholder').optional().isString().trim(),
   body('helperText').optional().isString().trim(),
   body('isRequired').optional().isBoolean(),
@@ -94,8 +153,12 @@ router.get(
     const { status, assignedTo } = req.query;
 
     const filters: { status?: string; assignedTo?: string } = {};
-    if (status) filters.status = status as string;
-    if (assignedTo) filters.assignedTo = assignedTo as string;
+    if (status) {
+      filters.status = status as string;
+    }
+    if (assignedTo) {
+      filters.assignedTo = assignedTo as string;
+    }
 
     const intakeFlows = await intakeFlowService.getIntakeFlows(filters);
 
@@ -531,7 +594,21 @@ router.patch(
   authenticate,
   param('id').isUUID(),
   body('label').optional().isString().trim().isLength({ min: 1, max: 255 }),
-  body('type').optional().isIn(['TEXT', 'NUMBER', 'EMAIL', 'DATE', 'SELECT', 'MULTI_SELECT', 'RADIO', 'CHECKBOX', 'TEXTAREA', 'PHONE', 'BOOLEAN']),
+  body('type')
+    .optional()
+    .isIn([
+      'TEXT',
+      'NUMBER',
+      'EMAIL',
+      'DATE',
+      'SELECT',
+      'MULTI_SELECT',
+      'RADIO',
+      'CHECKBOX',
+      'TEXTAREA',
+      'PHONE',
+      'BOOLEAN',
+    ]),
   body('placeholder').optional().isString().trim(),
   body('helperText').optional().isString().trim(),
   body('isRequired').optional().isBoolean(),
