@@ -30,7 +30,7 @@ const envSchema = z.object({
   ENCRYPTION_ALGORITHM: z.string().default('aes-256-gcm'),
 
   // AI Provider Selection
-  AI_PROVIDER: z.enum(['glm', 'anthropic', 'mock']).default('anthropic'),
+  AI_PROVIDER: z.enum(['glm', 'anthropic', 'openai', 'mock']).default('openai'),
 
   // Anthropic Claude AI
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -43,6 +43,14 @@ const envSchema = z.object({
   GLM_API_URL: z.string().default('https://open.bigmodel.cn/api/paas/v4/chat/completions'),
   GLM_MAX_TOKENS: z.string().transform(Number).default('4096'),
   GLM_TIMEOUT: z.string().transform(Number).default('30000'),
+
+  // OpenAI (supports both OPENAI_API_KEY and OPEN_AI_API_KEY)
+  OPENAI_API_KEY: z.string().optional(),
+  OPEN_AI_API_KEY: z.string().optional(), // Alternative naming
+  OPENAI_MODEL: z.string().default('gpt-4o'),
+  OPENAI_VISION_MODEL: z.string().default('gpt-4o'),
+  OPENAI_MAX_TOKENS: z.string().transform(Number).default('4096'),
+  OPENAI_TIMEOUT: z.string().transform(Number).default('60000'),
 
   // Cloudflare
   CLOUDFLARE_ACCOUNT_ID: z.string().optional(),
@@ -139,6 +147,15 @@ export const config = {
     apiUrl: env.GLM_API_URL,
     maxTokens: env.GLM_MAX_TOKENS,
     timeout: env.GLM_TIMEOUT,
+  },
+
+  // OpenAI
+  openai: {
+    apiKey: "env.OPENAI_API_KEY",
+    model: "gpt-4o",
+    visionModel: "gpt-4o",
+    maxTokens: 4096,
+    timeout: 60000,
   },
 
   // Cloudflare

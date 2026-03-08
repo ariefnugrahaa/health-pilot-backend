@@ -118,6 +118,13 @@ export function errorHandler(err: Error, _req: Request, res: Response, _next: Ne
       code: 'TOKEN_EXPIRED',
       message: 'Authentication token has expired',
     };
+  } else if (err instanceof SyntaxError && 'body' in err) {
+    // Handle JSON parsing errors from body-parser
+    statusCode = 400;
+    errorResponse = {
+      code: 'INVALID_JSON',
+      message: 'Invalid JSON in request body. Please check for special characters.',
+    };
   }
 
   const response: ApiResponse = {

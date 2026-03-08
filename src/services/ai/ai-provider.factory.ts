@@ -3,7 +3,7 @@ import logger from '../../utils/logger.js';
 import type { IAIService } from './providers/base-ai-provider.interface.js';
 import { GLMProvider } from './providers/glm.provider.js';
 import { AnthropicProvider } from './providers/anthropic.provider.js';
-
+import { OpenAIProvider } from './providers/openai.provider.js';
 import { MockProvider } from './providers/mock.provider.js';
 
 /**
@@ -32,13 +32,16 @@ export class AIProviderFactory {
         case 'anthropic':
           this.instance = new AnthropicProvider();
           break;
+        case 'openai':
+          this.instance = new OpenAIProvider();
+          break;
         case 'mock':
           this.instance = new MockProvider();
           break;
         default:
           logger.error(`Unsupported AI provider configured: ${providerType}`);
           throw new Error(
-            `Unsupported AI provider: ${providerType}. Valid options: 'glm', 'anthropic', 'mock'`
+            `Unsupported AI provider: ${providerType}. Valid options: 'glm', 'anthropic', 'openai', 'mock'`
           );
       }
 

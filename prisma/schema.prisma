@@ -109,6 +109,27 @@ enum MatchingRuleOperator {
   IS_NOT_NULL
 }
 
+enum IntakeFlowStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum FieldType {
+  TEXT
+  NUMBER
+  EMAIL
+  DATE
+  SELECT
+  MULTI_SELECT
+  RADIO
+  CHECKBOX
+  TEXTAREA
+  PHONE
+  BOOLEAN
+}
+
 enum AuditAction {
   CREATE
   READ
@@ -153,6 +174,10 @@ model User {
   notifications     Notification[]
   providerRatings   ProviderRating[]
   treatmentFeedback TreatmentFeedback[]
+  
+  // Intake Flow relations
+  createdIntakeFlows   IntakeFlow[] @relation("IntakeFlowCreator")
+  updatedIntakeFlows   IntakeFlow[] @relation("IntakeFlowUpdater")
 
   @@index([email])
   @@index([status])
@@ -685,6 +710,94 @@ model AIPromptVersion {
   @@index([name])
   @@index([isActive])
   @@map("ai_prompt_versions")
+}
+
+// ============================================
+// CUSTOMIZABLE INTAKE FLOWS
+// ============================================
+
+/// Intake Flow - customizable questionnaire templates
+model IntakeFlow {
+  id                String            @id @default(uuid()) @db.Uuid
+  name              String
+  description       String?           @db.Text
+  status            IntakeFlowStatus  @default(DRAFT)
+  version           Int               @default(1)
+  
+  // Configuration
+  isDefault         Boolean           @default(false) @map("is_default")
+  assignedTo        String?           @map("assigned_to") // User or group who manages this flow
+  
+  // Metadata
+  createdById       String            @map("created_by_id") @db.Uuid
+  lastUpdatedById   String?           @map("last_updated_by_id") @db.Uuid
+  publishedAt       DateTime?         @map("published_at")
+  archivedAt        DateTime?         @map("archived_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  createdBy         User              @relation("IntakeFlowCreator", fields: [createdById], references: [id])
+  lastUpdatedBy     User?             @relation("IntakeFlowUpdater", fields: [lastUpdatedById], references: [id])
+  sections         IntakeFlowSection[]
+
+  @@index([status])
+  @@index([isDefault])
+  @@index([assignedTo])
+  @@map("intake_flows")
+}
+
+/// Intake Flow Section - logical groupings (e.g., "Basic Information", "Medical History")
+model IntakeFlowSection {
+  id                String            @id @default(uuid()) @db.Uuid
+  intakeFlowId       String            @map("intake_flow_id") @db.Uuid
+  title             String
+  description       String?           @db.Text
+  order             Int               // Display order within flow
+  isOptional        Boolean           @default(false) @map("is_optional")
+  
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  intakeFlow        IntakeFlow        @relation(fields: [intakeFlowId], references: [id], onDelete: Cascade)
+  fields            IntakeFlowField[]
+
+  @@index([intakeFlowId])
+  @@map("intake_flow_sections")
+}
+
+/// Intake Flow Field - individual form fields
+model IntakeFlowField {
+  id                String            @id @default(uuid()) @db.Uuid
+  sectionId         String            @map("section_id") @db.Uuid
+  fieldKey          String            @map("field_key") // Unique key within flow (e.g., "height", "weight")
+  label             String
+  type              FieldType
+  placeholder       String?
+  helperText        String?           @map("helper_text") @db.Text
+  isRequired        Boolean           @default(true) @map("is_required")
+  order             Int               // Display order within section
+  
+  // Validation rules (stored as JSON)
+  validationRules   Json?             @map("validation_rules") // {min, max, pattern, etc.}
+  
+  // Options for select/radio/checkbox fields
+  options           Json?             // [{value, label, description}]
+  
+  // Conditional logic
+  dependsOnField    String?           @map("depends_on_field") // Show only when this field has specific value
+  dependsOnValue    String?           @map("depends_on_value")
+  
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  section           IntakeFlowSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@unique([sectionId, fieldKey])
+  @@index([sectionId])
+  @@map("intake_flow_fields")
 }
 
 // ============================================

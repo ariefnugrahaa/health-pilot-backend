@@ -8,6 +8,7 @@ import type {
   AIAnalysisResponse,
   HealthIntakeData,
   BloodTestResult,
+  NextStepRecommendation,
 } from '../../../types/index.js';
 import jwt from 'jsonwebtoken';
 
@@ -199,7 +200,7 @@ CRITICAL BOUNDARIES:
 - Users must consult licensed healthcare providers for medical decisions
 
 YOUR TASK:
-Analyze the provided health intake data and generate a clear, educational summary.
+Analyze the provided health intake data and generate a clear, educational summary with structured next step recommendations.
 
 OUTPUT FORMAT (JSON only, no markdown):
 {
@@ -211,10 +212,57 @@ OUTPUT FORMAT (JSON only, no markdown):
   ],
   "warnings": [
     "Any areas that may require professional attention"
+  ],
+  "nextSteps": [
+    {
+      "id": "unique-id-1",
+      "title": "Track Sleep and Energy Patterns",
+      "description": "A brief description of what this step involves and why it matters",
+      "effortLevel": "LOW",
+      "icon": "sleep",
+      "whatHappensNext": "You'll log your sleep and energy daily. After 1-2 weeks, patterns emerge that reveal triggers."
+    },
+    {
+      "id": "unique-id-2",
+      "title": "Explore Food and Digestive Triggers",
+      "description": "Description of this step",
+      "effortLevel": "MODERATE",
+      "icon": "food",
+      "whatHappensNext": "You'll try an elimination approach. Results typically show in 2-4 weeks."
+    },
+    {
+      "id": "unique-id-3",
+      "title": "Consult a Healthcare Provider",
+      "description": "Description of this step",
+      "effortLevel": "HIGH",
+      "icon": "doctor",
+      "whatHappensNext": "A provider can run tests, diagnose conditions, and prescribe treatments if needed."
+    }
   ]
 }
 
-GUIDELINES:
+EFFORT LEVELS:
+- LOW: Simple tracking, logging, or minor lifestyle adjustments (5-10 min/day)
+- MODERATE: Requires behavior changes, planning, or moderate time investment (20-30 min/day for weeks)
+- HIGH: Requires significant commitment, professional appointments, or medical procedures
+
+ICON OPTIONS:
+- "sleep": Sleep, rest, recovery related
+- "food": Diet, nutrition, eating habits
+- "doctor": Medical consultation, professional help
+- "exercise": Physical activity, movement
+- "tracking": Monitoring, logging, data collection
+- "mental_health": Stress, anxiety, mental wellbeing
+- "supplements": Vitamins, supplements, nutrition support
+
+NEXT STEPS GUIDELINES:
+- Generate 2-4 relevant next steps based on the user's health data
+- Each step should be specific and actionable
+- Match effort level realistically to what the step requires
+- "whatHappensNext" should explain the process and timeline
+- Prioritize steps that address the user's stated goals
+
+GENERAL GUIDELINES:
 - Be direct and specific
 - Focus on actionable insights
 - Highlight any concerning patterns
@@ -348,19 +396,31 @@ GUIDELINES:
           healthSummary?: string;
           recommendations?: string[];
           warnings?: string[];
+          nextSteps?: NextStepRecommendation[];
         };
+
+        // Generate default next steps if not provided
+        const nextSteps = parsed.nextSteps?.length
+          ? parsed.nextSteps.map((step, index) => ({
+              ...step,
+              id: step.id || `step-${index + 1}`,
+            }))
+          : this.generateDefaultNextSteps(parsed.recommendations || []);
+
         return {
           healthSummary: parsed.healthSummary || text,
           recommendations: parsed.recommendations || [],
           warnings: parsed.warnings || [],
+          nextSteps,
         };
       }
 
-      // Fallback: return raw text as summary
+      // Fallback: return raw text as summary with default next steps
       return {
         healthSummary: text,
         recommendations: [],
         warnings: [],
+        nextSteps: this.generateDefaultNextSteps([]),
       };
     } catch (error) {
       logger.error('Failed to parse GLM response', { error });
@@ -369,8 +429,49 @@ GUIDELINES:
         healthSummary: text,
         recommendations: [],
         warnings: [],
+        nextSteps: this.generateDefaultNextSteps([]),
       };
     }
+  }
+
+  /**
+   * Generate default next steps if AI doesn't provide structured ones
+   */
+  private generateDefaultNextSteps(recommendations: string[]): NextStepRecommendation[] {
+    const defaultSteps: NextStepRecommendation[] = [
+      {
+        id: 'track-sleep',
+        title: 'Track Sleep and Energy Patterns',
+        description: 'Monitor your sleep quality and energy levels throughout the day to identify patterns and potential triggers affecting your wellbeing.',
+        effortLevel: 'LOW',
+        icon: 'sleep',
+        whatHappensNext: 'You\'ll log your sleep and energy daily. After 1-2 weeks, patterns emerge that reveal triggers and help guide next steps.',
+      },
+      {
+        id: 'explore-food-triggers',
+        title: 'Explore Food and Digestive Triggers',
+        description: 'Identify foods that may be affecting your health by tracking what you eat and how you feel afterward.',
+        effortLevel: 'MODERATE',
+        icon: 'food',
+        whatHappensNext: 'You\'ll try an elimination approach, removing common trigger foods. Results typically show in 2-4 weeks.',
+      },
+      {
+        id: 'consult-provider',
+        title: 'Consult a Healthcare Provider',
+        description: 'Speak with a qualified healthcare professional who can provide personalized medical advice and run appropriate tests.',
+        effortLevel: 'HIGH',
+        icon: 'doctor',
+        whatHappensNext: 'A provider can run blood tests, diagnose conditions, and prescribe treatments if needed. They can also refer you to specialists.',
+      },
+    ];
+
+    // If we have recommendations, try to match them to default steps
+    if (recommendations.length > 0) {
+      // Return default steps but log that we're using them
+      logger.info('Using default next steps as AI did not provide structured recommendations');
+    }
+
+    return defaultSteps;
   }
 
   /**

@@ -338,10 +338,22 @@ export interface AIAnalysisRequest {
   userGender?: Gender;
 }
 
+// Next Step Recommendation - structured recommendation with effort level
+export interface NextStepRecommendation {
+  id: string;
+  title: string;
+  description: string;
+  effortLevel: 'LOW' | 'MODERATE' | 'HIGH';
+  icon: 'sleep' | 'food' | 'doctor' | 'exercise' | 'tracking' | 'mental_health' | 'supplements';
+  whatHappensNext: string;
+  learnMoreUrl?: string;
+}
+
 export interface AIAnalysisResponse {
   healthSummary: string;
   recommendations: string[];
   warnings: string[];
+  nextSteps?: NextStepRecommendation[];
   tokensUsed: number;
   modelVersion: string;
   promptVersion: string;

@@ -2,7 +2,7 @@ import { prisma } from '../../utils/database.js';
 import logger from '../../utils/logger.js';
 import { encryptionService } from '../../utils/encryption.js';
 import { matchingService } from '../matching/matching.service.js';
-import { anthropicService } from '../ai/anthropic.service.js';
+import { AIProviderFactory } from '../ai/ai-provider.factory.js';
 import { NotFoundError } from '../../api/middlewares/error.middleware.js';
 import type {
   HealthIntakeData,
@@ -79,8 +79,14 @@ export class RecommendationService implements IRecommendationService {
       bloodTests: bloodTestResults,
     });
 
-    // 4. Run AI Analysis
-    const aiAnalysis = await anthropicService.analyzeHealth({
+    // 4. Run AI Analysis using configured provider
+    const aiProvider = AIProviderFactory.getProvider();
+    logger.info('Running AI analysis for recommendation', {
+      provider: aiProvider.getProviderName(),
+      model: aiProvider.getModelVersion(),
+    });
+
+    const aiAnalysis = await aiProvider.analyzeHealth({
       intakeData,
       bloodTestResults,
     });

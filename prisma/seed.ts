@@ -27,6 +27,26 @@ async function main(): Promise<void> {
     console.log(`✅ Admin user created: ${admin.email}`);
 
     // ============================================
+    // Create Test Customer User
+    // ============================================
+    const testPassword = await bcrypt.hash('Test123!', 12);
+    const testUser = await prisma.user.upsert({
+        where: { email: 'test@healthpilot.com' },
+        update: {},
+        create: {
+            email: 'test@healthpilot.com',
+            passwordHash: testPassword,
+            firstName: 'John',
+            lastName: 'Doe',
+            isAnonymous: false,
+            isEmailVerified: true,
+            status: 'ACTIVE',
+            role: 'USER',
+        },
+    });
+    console.log(`✅ Test user created: ${testUser.email}`);
+
+    // ============================================
     // Create Biomarkers
     // ============================================
     const biomarkers = [
@@ -350,6 +370,161 @@ Provide your response in JSON format with:
         },
     });
     console.log(`✅ Lab partners created`);
+
+    // ============================================
+    // Create Default Intake Flow
+    // ============================================
+    const existingFlow = await prisma.intakeFlow.findFirst({
+        where: { isDefault: true },
+    });
+
+    if (!existingFlow) {
+        const defaultFlow = await prisma.intakeFlow.create({
+            data: {
+                name: 'Default Health Intake',
+                description: 'Standard health intake questionnaire for new users',
+                status: 'ACTIVE',
+                version: 1,
+                isDefault: true,
+                createdById: admin.id,
+                sections: {
+                    create: [
+                        {
+                            title: 'Basic Information',
+                            description: 'Tell us a bit about yourself',
+                            order: 1,
+                            isOptional: false,
+                            fields: {
+                                create: [
+                                    {
+                                        fieldKey: 'dob',
+                                        label: 'Date of Birth',
+                                        type: 'DATE',
+                                        placeholder: 'Select your date of birth',
+                                        isRequired: true,
+                                        order: 1,
+                                    },
+                                    {
+                                        fieldKey: 'gender',
+                                        label: 'Gender',
+                                        type: 'SELECT',
+                                        placeholder: 'Select your gender',
+                                        isRequired: true,
+                                        order: 2,
+                                        options: [
+                                            { value: 'male', label: 'Male' },
+                                            { value: 'female', label: 'Female' },
+                                            { value: 'other', label: 'Other' },
+                                            { value: 'prefer_not_to_say', label: 'Prefer not to say' },
+                                        ],
+                                    },
+                                    {
+                                        fieldKey: 'height',
+                                        label: 'Height (cm)',
+                                        type: 'NUMBER',
+                                        placeholder: 'e.g., 175',
+                                        helperText: 'Your height in centimeters',
+                                        isRequired: true,
+                                        order: 3,
+                                        validationRules: { min: 50, max: 250 },
+                                    },
+                                    {
+                                        fieldKey: 'weight',
+                                        label: 'Weight (kg)',
+                                        type: 'NUMBER',
+                                        placeholder: 'e.g., 70',
+                                        helperText: 'Your weight in kilograms',
+                                        isRequired: true,
+                                        order: 4,
+                                        validationRules: { min: 20, max: 300 },
+                                    },
+                                ],
+                            },
+                        },
+                        {
+                            title: 'Health Goals',
+                            description: 'What are you looking to achieve?',
+                            order: 2,
+                            isOptional: false,
+                            fields: {
+                                create: [
+                                    {
+                                        fieldKey: 'goal',
+                                        label: 'Primary Health Goal',
+                                        type: 'RADIO',
+                                        helperText: 'Select your main health objective',
+                                        isRequired: true,
+                                        order: 1,
+                                        options: [
+                                            { value: 'hormone_optimization', label: 'Hormone Optimization', description: 'Balance and optimize your hormone levels' },
+                                            { value: 'weight_management', label: 'Weight Management', description: 'Lose weight or maintain a healthy weight' },
+                                            { value: 'energy_vitality', label: 'Energy & Vitality', description: 'Boost your energy levels and overall wellness' },
+                                            { value: 'hair_health', label: 'Hair Health', description: 'Prevent hair loss and promote hair growth' },
+                                            { value: 'sexual_health', label: 'Sexual Health', description: 'Address sexual health concerns' },
+                                            { value: 'general_wellness', label: 'General Wellness', description: 'Overall health improvement' },
+                                        ],
+                                    },
+                                ],
+                            },
+                        },
+                        {
+                            title: 'Medical History',
+                            description: 'Help us understand your health background',
+                            order: 3,
+                            isOptional: false,
+                            fields: {
+                                create: [
+                                    {
+                                        fieldKey: 'condition_list',
+                                        label: 'Do you have any of these conditions?',
+                                        type: 'MULTI_SELECT',
+                                        helperText: 'Select all that apply',
+                                        isRequired: false,
+                                        order: 1,
+                                        options: [
+                                            { value: 'diabetes', label: 'Diabetes' },
+                                            { value: 'hypertension', label: 'High Blood Pressure' },
+                                            { value: 'heart_disease', label: 'Heart Disease' },
+                                            { value: 'thyroid_disorder', label: 'Thyroid Disorder' },
+                                            { value: 'depression_anxiety', label: 'Depression/Anxiety' },
+                                            { value: 'none', label: 'None of the above' },
+                                        ],
+                                    },
+                                ],
+                            },
+                        },
+                        {
+                            title: 'Lifestyle',
+                            description: 'Tell us about your lifestyle habits',
+                            order: 4,
+                            isOptional: true,
+                            fields: {
+                                create: [
+                                    {
+                                        fieldKey: 'lifestyle_factors',
+                                        label: 'Which lifestyle factors apply to you?',
+                                        type: 'MULTI_SELECT',
+                                        helperText: 'Select all that apply',
+                                        isRequired: false,
+                                        order: 1,
+                                        options: [
+                                            { value: 'exercise', label: 'Regular Exercise', description: 'I exercise 3+ times per week' },
+                                            { value: 'stress', label: 'High Stress', description: 'I experience high stress levels' },
+                                            { value: 'sleep', label: 'Sleep Issues', description: 'I have trouble sleeping' },
+                                            { value: 'diet', label: 'Dietary Restrictions', description: 'I follow a specific diet' },
+                                        ],
+                                    },
+                                ],
+                            },
+                        },
+                    ],
+                },
+            },
+        });
+        console.log(`✅ Default intake flow created: ${defaultFlow.name}`);
+    } else {
+        console.log(`✅ Default intake flow already exists`);
+    }
 
     console.log('🎉 Database seed completed successfully!');
 }

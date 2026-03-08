@@ -1,5 +1,5 @@
 import { IAIService } from './base-ai-provider.interface.js';
-import { AIAnalysisRequest, AIAnalysisResponse } from '../../../types/index.js';
+import { AIAnalysisRequest, AIAnalysisResponse, NextStepRecommendation } from '../../../types/index.js';
 
 export class MockProvider implements IAIService {
     async analyzeHealth(request: AIAnalysisRequest): Promise<AIAnalysisResponse> {
@@ -19,6 +19,7 @@ export class MockProvider implements IAIService {
                 "This is a MOCK response.",
                 "Do not use for medical decisions."
             ],
+            nextSteps: this.getDefaultNextSteps(),
             tokensUsed: 0,
             modelVersion: 'v1.0-mock',
             promptVersion: 'v1.0'
@@ -35,5 +36,34 @@ export class MockProvider implements IAIService {
 
     getModelVersion(): string {
         return 'v1.0-mock';
+    }
+
+    private getDefaultNextSteps(): NextStepRecommendation[] {
+        return [
+            {
+                id: 'mock-track-sleep',
+                title: 'Track Sleep and Energy Patterns',
+                description: '[MOCK] Monitor your sleep quality and energy levels throughout the day to identify patterns and potential triggers affecting your wellbeing.',
+                effortLevel: 'LOW',
+                icon: 'sleep',
+                whatHappensNext: 'You\'ll log your sleep and energy daily. After 1-2 weeks, patterns emerge that reveal triggers and help guide next steps.',
+            },
+            {
+                id: 'mock-food-triggers',
+                title: 'Explore Food and Digestive Triggers',
+                description: '[MOCK] Identify foods that may be affecting your health by tracking what you eat and how you feel afterward.',
+                effortLevel: 'MODERATE',
+                icon: 'food',
+                whatHappensNext: 'You\'ll try an elimination approach, removing common trigger foods. Results typically show in 2-4 weeks.',
+            },
+            {
+                id: 'mock-consult-provider',
+                title: 'Consult a Healthcare Provider',
+                description: '[MOCK] Speak with a qualified healthcare professional who can provide personalized medical advice and run appropriate tests.',
+                effortLevel: 'HIGH',
+                icon: 'doctor',
+                whatHappensNext: 'A provider can run blood tests, diagnose conditions, and prescribe treatments if needed. They can also refer you to specialists.',
+            },
+        ];
     }
 }

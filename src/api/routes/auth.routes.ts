@@ -395,4 +395,85 @@ router.post(
   })
 );
 
+/**
+ * POST /auth/link-anonymous-intake
+ * Link an anonymous intake to an authenticated user
+ * This endpoint allows users to save their anonymous intake data after logging in
+ */
+router.post(
+  '/link-anonymous-intake',
+  authenticate,
+  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+    const { anonymousIntakeId, anonymousUserId } = req.body as {
+      anonymousIntakeId?: string;
+      anonymousUserId?: string;
+    };
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      throw new AuthenticationError('User not authenticated');
+    }
+
+    if (!anonymousIntakeId) {
+      throw new ValidationError('anonymousIntakeId is required');
+    }
+
+    // Verify the anonymous intake exists
+    const anonymousIntake = await prisma.healthIntake.findUnique({
+      where: { id: anonymousIntakeId },
+      include: { user: true },
+    });
+
+    if (!anonymousIntake) {
+      throw new NotFoundError('Anonymous intake');
+    }
+
+    // Check if the intake is from an anonymous user
+    if (!anonymousIntake.user.isAnonymous) {
+      throw new ValidationError('Intake is not from an anonymous user');
+    }
+
+    // Verify the anonymous user ID if provided (for security)
+    if (anonymousUserId && anonymousIntake.userId !== anonymousUserId) {
+      throw new ValidationError('Anonymous user ID does not match');
+    }
+
+    // Update the intake to associate it with the authenticated user
+    const updatedIntake = await prisma.healthIntake.update({
+      where: { id: anonymousIntakeId },
+      data: {
+        userId,
+      },
+    });
+
+    // If the anonymous user has no other intakes or recommendations, delete the anonymous user
+    const anonymousUserIntakesCount = await prisma.healthIntake.count({
+      where: { userId: anonymousIntake.userId },
+    });
+
+    if (anonymousUserIntakesCount === 0) {
+      await prisma.user.delete({
+        where: { id: anonymousIntake.userId },
+      });
+      logger.info('Anonymous user deleted', { userId: anonymousIntake.userId });
+    }
+
+    logger.info('Anonymous intake linked to authenticated user', {
+      anonymousIntakeId,
+      authenticatedUserId: userId,
+    });
+
+    const response: ApiResponse<{ intakeId: string; message: string }> = {
+      success: true,
+      data: {
+        intakeId: updatedIntake.id,
+        message: 'Intake successfully linked to your account',
+      },
+      meta: { timestamp: new Date().toISOString() },
+    };
+
+    res.status(200).json(response);
+  })
+);
+
 export default router;

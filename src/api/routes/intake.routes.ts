@@ -12,6 +12,61 @@ import type { ApiResponse, AuthenticatedRequest, HealthIntakeData, AIAnalysisReq
 
 const router = Router();
 
+const mapFieldTypeToStepType = (fieldType: string): string => {
+  const normalizedType = fieldType.toUpperCase();
+  switch (normalizedType) {
+    case 'TEXT':
+      return 'text';
+    case 'NUMBER':
+      return 'number';
+    case 'EMAIL':
+      return 'email';
+    case 'DATE':
+      return 'date';
+    case 'SELECT':
+      return 'select';
+    case 'MULTI_SELECT':
+      return 'multi_select';
+    case 'RADIO':
+      return 'radio';
+    case 'CHECKBOX':
+      return 'checkbox';
+    case 'TEXTAREA':
+      return 'textarea';
+    case 'PHONE':
+      return 'phone';
+    case 'BOOLEAN':
+      return 'boolean';
+    default:
+      return 'text';
+  }
+};
+
+const toStepOptions = (options: unknown): Array<{
+  id: string;
+  value: string;
+  label: string;
+  description?: string;
+}> | undefined => {
+  if (!Array.isArray(options)) {
+    return undefined;
+  }
+
+  return options
+    .filter((option): option is Record<string, unknown> => typeof option === 'object' && option !== null)
+    .map((option, index) => {
+      const value = String(option.value ?? `option_${index + 1}`);
+      const label = String(option.label ?? value);
+      const description = typeof option.description === 'string' ? option.description : undefined;
+      return {
+        id: `${value}_${index}`,
+        value,
+        label,
+        ...(description ? { description } : {}),
+      };
+    });
+};
+
 // ============================================
 // Validation Rules
 // ============================================
@@ -36,86 +91,47 @@ const createIntakeValidation = [
 router.get(
   '/config',
   asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
-    // This configuration could ideally be stored in a database or a separate config file
+    const activeFlow = await prisma.intakeFlow.findFirst({
+      where: { status: 'ACTIVE' },
+      orderBy: [
+        { isDefault: 'desc' },
+        { updatedAt: 'desc' },
+      ],
+      include: {
+        sections: {
+          orderBy: { order: 'asc' },
+          include: {
+            fields: {
+              orderBy: { order: 'asc' },
+            },
+          },
+        },
+      },
+    });
+
+    if (!activeFlow || activeFlow.sections.length === 0) {
+      throw new NotFoundError('Active intake flow');
+    }
+
     const intakeConfig = {
-      steps: [
-        {
-          id: "goals",
-          title: "Getting started",
-          description: "What would you like to focus on right now?",
-          fields: [
-            {
-              id: "goal",
-              type: "radio",
-              label: "Primary Goal",
-              required: true,
-              options: [
-                { id: "overall", value: "overall_health", label: "Understand my overall health", description: "Get a broad view of your health status" },
-                { id: "concern", value: "specific_concern", label: "Explore a specific concern", description: "Focus on something that's bothering you" },
-                { id: "prevention", value: "prevention", label: "Prevention and long-term health", description: "Stay healthy and reduce future risk" },
-                { id: "unsure", value: "unsure", label: "I'm not sure yet", description: "Let the system guide me" },
-              ]
-            }
-          ]
-        },
-        {
-          id: "health_profile",
-          title: "Health Profile",
-          description: "Basic measurements to help us personalize recommendations.",
-          fields: [
-            { id: "height", type: "number", label: "Height (cm)", placeholder: "175", required: true },
-            { id: "weight", type: "number", label: "Weight (kg)", placeholder: "70", required: true },
-            { id: "dob", type: "date", label: "Date of Birth", required: true },
-            {
-              id: "gender",
-              type: "radio",
-              label: "Biological Sex",
-              required: true,
-              options: [
-                { id: "female", value: "female", label: "Female" },
-                { id: "male", value: "male", label: "Male" }
-              ]
-            }
-          ]
-        },
-        {
-          id: "conditions",
-          title: "Specific Conditions",
-          description: "Do you have any diagnosed medical conditions?",
-          fields: [
-            {
-              id: "condition_list",
-              type: "checkbox",
-              label: "Select all that apply",
-              options: [
-                { id: "diabetes", value: "diabetes", label: "Diabetes (Type 1 or 2)" },
-                { id: "hypertension", value: "hypertension", label: "Hypertension (High Blood Pressure)" },
-                { id: "cholesterol", value: "high_cholesterol", label: "High Cholesterol" },
-                { id: "thyroid", value: "thyroid", label: "Thyroid Disorders" },
-                { id: "none", value: "none", label: "None of the above" },
-              ]
-            }
-          ]
-        },
-        {
-          id: "lifestyle",
-          title: "Your Lifestyle",
-          description: "Which lifestyle factors would you like to discuss?",
-          fields: [
-            {
-              id: "lifestyle_factors",
-              type: "checkbox",
-              label: "Select all that apply",
-              options: [
-                { id: "sleep", value: "sleep", label: "Sleep Quality" },
-                { id: "exercise", value: "exercise", label: "Exercise and Activity" },
-                { id: "stress", value: "stress", label: "Stress Management" },
-                { id: "diet", value: "diet", label: "Diet and Nutrition" },
-              ]
-            }
-          ]
-        }
-      ]
+      steps: activeFlow.sections.map((section) => ({
+        id: section.id,
+        title: section.title,
+        description: section.description ?? undefined,
+        isOptional: section.isOptional,
+        fields: section.fields.map((field) => ({
+          id: field.fieldKey,
+          type: mapFieldTypeToStepType(field.type),
+          label: field.label,
+          placeholder: field.placeholder ?? undefined,
+          helperText: field.helperText ?? undefined,
+          required: field.isRequired,
+          options: toStepOptions(field.options),
+          validation: field.validationRules,
+          dependsOnField: field.dependsOnField ?? undefined,
+          dependsOnValue: field.dependsOnValue ?? undefined,
+        })),
+      })),
     };
 
     const response: ApiResponse<typeof intakeConfig> = {
@@ -215,7 +231,7 @@ router.post(
 
     const bmi = (height && weight) ? weight / ((height / 100) * (height / 100)) : undefined;
 
-    const intakeData: HealthIntakeData = {
+    const intakeData: HealthIntakeData & { rawResponses?: Record<string, unknown> } = {
       biometrics: {
         height,
         weight,
@@ -247,6 +263,7 @@ router.post(
         deliveryPreference: 'home'
       }
     };
+    intakeData.rawResponses = rawData as Record<string, unknown>;
 
     // Encrypt PHI data
     const encryptedData = encryptionService.encrypt(JSON.stringify(intakeData));
@@ -286,22 +303,28 @@ router.post(
 /**
  * GET /intakes/:intakeId
  * Get health intake by ID
+ * Supports both authenticated and anonymous users
  */
 router.get(
   '/:intakeId',
-  authenticate,
-  auditPhiAccess('health_intake'),
+  optionalAuth,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { intakeId } = (req as AuthenticatedRequest & { params: { intakeId: string } }).params;
     const userId = req.user?.userId;
-    if (!userId) {
-      throw new NotFoundError('User');
-    }
+
+    // Build query - if authenticated, ensure user owns the intake
+    // If anonymous, just find by ID (they have the ID from their session)
+    const whereClause = userId
+      ? { id: intakeId, userId }
+      : { id: intakeId };
 
     const intake = await prisma.healthIntake.findFirst({
-      where: {
-        id: intakeId,
-        userId, // Ensure user owns this intake
+      where: whereClause,
+      include: {
+        recommendations: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
       },
     });
 
@@ -314,10 +337,27 @@ router.get(
       encryptionService.decrypt(intake.intakeDataEncrypted)
     ) as HealthIntakeData;
 
+    // Parse recommendation data if available
+    let recommendationData = null;
+    const latestRecommendation = intake.recommendations?.[0];
+    if (latestRecommendation) {
+      const decryptedRecommendation = JSON.parse(
+        encryptionService.decrypt(latestRecommendation.healthSummaryEncrypted)
+      );
+      recommendationData = {
+        id: latestRecommendation.id,
+        content: decryptedRecommendation.summary,
+        actions: decryptedRecommendation.recommendations,
+        warnings: decryptedRecommendation.warnings,
+        nextSteps: decryptedRecommendation.nextSteps,
+      };
+    }
+
     const response: ApiResponse<{
       id: string;
       status: string;
       data: HealthIntakeData;
+      recommendation: typeof recommendationData;
       createdAt: Date;
       updatedAt: Date;
     }> = {
@@ -326,6 +366,7 @@ router.get(
         id: intake.id,
         status: intake.status,
         data: decryptedData,
+        recommendation: recommendationData,
         createdAt: intake.createdAt,
         updatedAt: intake.updatedAt,
       },
@@ -546,6 +587,7 @@ router.post(
             summary: aiResponse.healthSummary,
             recommendations: aiResponse.recommendations,
             warnings: aiResponse.warnings,
+            nextSteps: aiResponse.nextSteps,
           })
         ),
         primaryRecommendations: aiResponse.recommendations.slice(0, 3),
@@ -579,6 +621,7 @@ router.post(
       healthSummary: string;
       recommendations: string[];
       warnings: string[];
+      nextSteps?: typeof aiResponse.nextSteps;
     }> = {
       success: true,
       data: {
@@ -589,6 +632,7 @@ router.post(
         healthSummary: aiResponse.healthSummary,
         recommendations: aiResponse.recommendations,
         warnings: aiResponse.warnings,
+        nextSteps: aiResponse.nextSteps,
       },
       meta: { timestamp: new Date().toISOString() },
     };

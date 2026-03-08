@@ -10,6 +10,7 @@ import type {
   HealthIntakeData,
   BloodTestResult,
   Gender,
+  NextStepRecommendation,
 } from '../../../types/index.js';
 
 /**
@@ -152,14 +153,31 @@ YOUR ROLE:
 3. Suggest treatment pathways that may be relevant
 4. Explain biomarker results in simple terms
 5. Highlight any values that may warrant professional attention
+6. Generate structured next step recommendations
 
-OUTPUT FORMAT:
-Provide your response in the following JSON structure:
+OUTPUT FORMAT (JSON only):
 {
   "healthSummary": "A clear, educational overview of the health data",
   "recommendations": ["List of educational recommendations"],
-  "warnings": ["Any values or patterns that warrant professional attention"]
+  "warnings": ["Any values or patterns that warrant professional attention"],
+  "nextSteps": [
+    {
+      "id": "unique-id",
+      "title": "Action title",
+      "description": "What this step involves",
+      "effortLevel": "LOW|MODERATE|HIGH",
+      "icon": "sleep|food|doctor|exercise|tracking|mental_health|supplements",
+      "whatHappensNext": "Description of the process and timeline"
+    }
+  ]
 }
+
+EFFORT LEVELS:
+- LOW: Simple tracking or minor adjustments (5-10 min/day)
+- MODERATE: Requires behavior changes (20-30 min/day for weeks)
+- HIGH: Significant commitment or professional appointments
+
+Generate 2-4 relevant next steps based on the user's health data and goals.
 
 Always maintain a supportive, educational tone while being clear about limitations.`;
   }
@@ -297,11 +315,22 @@ Always maintain a supportive, educational tone while being clear about limitatio
           healthSummary?: string;
           recommendations?: string[];
           warnings?: string[];
+          nextSteps?: NextStepRecommendation[];
         };
+
+        // Generate default next steps if not provided
+        const nextSteps = parsed.nextSteps?.length
+          ? parsed.nextSteps.map((step, index) => ({
+              ...step,
+              id: step.id || `step-${index + 1}`,
+            }))
+          : this.generateDefaultNextSteps();
+
         return {
           healthSummary: parsed.healthSummary || text,
           recommendations: parsed.recommendations || [],
           warnings: parsed.warnings || [],
+          nextSteps,
         };
       }
 
@@ -310,6 +339,7 @@ Always maintain a supportive, educational tone while being clear about limitatio
         healthSummary: text,
         recommendations: [],
         warnings: [],
+        nextSteps: this.generateDefaultNextSteps(),
       };
     } catch {
       // If parsing fails, return raw text
@@ -317,7 +347,40 @@ Always maintain a supportive, educational tone while being clear about limitatio
         healthSummary: text,
         recommendations: [],
         warnings: [],
+        nextSteps: this.generateDefaultNextSteps(),
       };
     }
+  }
+
+  /**
+   * Generate default next steps if AI doesn't provide structured ones
+   */
+  private generateDefaultNextSteps(): NextStepRecommendation[] {
+    return [
+      {
+        id: 'track-sleep',
+        title: 'Track Sleep and Energy Patterns',
+        description: 'Monitor your sleep quality and energy levels throughout the day to identify patterns and potential triggers affecting your wellbeing.',
+        effortLevel: 'LOW',
+        icon: 'sleep',
+        whatHappensNext: 'You\'ll log your sleep and energy daily. After 1-2 weeks, patterns emerge that reveal triggers and help guide next steps.',
+      },
+      {
+        id: 'explore-food-triggers',
+        title: 'Explore Food and Digestive Triggers',
+        description: 'Identify foods that may be affecting your health by tracking what you eat and how you feel afterward.',
+        effortLevel: 'MODERATE',
+        icon: 'food',
+        whatHappensNext: 'You\'ll try an elimination approach, removing common trigger foods. Results typically show in 2-4 weeks.',
+      },
+      {
+        id: 'consult-provider',
+        title: 'Consult a Healthcare Provider',
+        description: 'Speak with a qualified healthcare professional who can provide personalized medical advice and run appropriate tests.',
+        effortLevel: 'HIGH',
+        icon: 'doctor',
+        whatHappensNext: 'A provider can run blood tests, diagnose conditions, and prescribe treatments if needed. They can also refer you to specialists.',
+      },
+    ];
   }
 }
