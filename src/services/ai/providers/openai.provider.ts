@@ -14,6 +14,7 @@ import type {
   HealthIntakeData,
   BloodTestResult,
   Gender,
+  IntakeScoringContext,
 } from '../../../types/index.js';
 
 /**
@@ -295,13 +296,49 @@ YOUR ROLE:
 3. Suggest treatment pathways that may be relevant
 4. Explain biomarker results in simple terms
 5. Highlight any values that may warrant professional attention
+6. Use any provided intake scoring context as a first-class signal when summarizing priorities and overall risk
 
 OUTPUT FORMAT:
 Provide your response as a valid JSON object with this structure:
 {
   "healthSummary": "A clear, educational overview of the health data (2-3 paragraphs)",
   "recommendations": ["List of educational recommendations"],
-  "warnings": ["Any values or patterns that warrant professional attention"]
+  "warnings": ["Any values or patterns that warrant professional attention"],
+  "structuredSummary": {
+    "plainLanguageSummary": ["Short paragraph 1", "Short paragraph 2"],
+    "responseSignals": [
+      {
+        "title": "From your responses",
+        "items": ["Signal 1", "Signal 2"]
+      }
+    ],
+    "bloodTestSignals": [
+      {
+        "biomarkerCode": "LDL",
+        "displayName": "LDL Cholesterol",
+        "value": 98,
+        "unit": "mg/dL",
+        "referenceRange": "0 - 100",
+        "status": "IN_RANGE|SLIGHTLY_HIGH|SLIGHTLY_LOW",
+        "detail": "Plain-language explanation of this marker"
+      }
+    ],
+    "whatThisMayMean": ["Short interpretation point"],
+    "limitationsAndBoundaries": ["Short limitation"],
+    "nextActionLabel": "View personalized recommendations"
+  },
+  "solutionPlan": {
+    "strategyTitle": "Short plan title for the best overall path",
+    "strategySummary": "1-2 sentence summary explaining the overall strategy",
+    "whyThisPlan": ["Short bullet reason", "Short bullet reason"],
+    "focusCategories": [
+      {
+        "id": "LOW_ENERGY|DIGESTIVE_DISCOMFORT|POOR_SLEEP|WEIGHT_MANAGEMENT",
+        "label": "Category label",
+        "reason": "Why this category matters for the user"
+      }
+    ]
+  }
 }
 
 Always maintain a supportive, educational tone while being clear about limitations.`;
@@ -330,6 +367,10 @@ Always maintain a supportive, educational tone while being clear about limitatio
       sections.push(this.formatBloodTestResults(request.bloodTestResults));
     }
 
+    if (request.intakeScoring) {
+      sections.push(this.formatIntakeScoring(request.intakeScoring));
+    }
+
     return `Please analyze the following health information and provide educational insights:\n\n${sections.join(
       '\n\n'
     )}\n\nRemember: Provide educational information only. Do not diagnose or prescribe. Return valid JSON.`;
@@ -348,9 +389,20 @@ CRITICAL BOUNDARIES:
     const typeSpecificPrompts: Record<ImageAnalysisRequest['analysisType'], string> = {
       blood_test: `
 YOUR TASK: Analyze blood test report images and extract relevant information.
-Extract all visible biomarker values, their units, and reference ranges.
-Identify any values that appear outside normal ranges.
-Provide educational context about what each biomarker indicates.`,
+Blood reports may appear in many formats, including tables, grouped sections, narrative summaries, and multi-page PDFs.
+Extract all visible biomarkers into structured rows even when the layout differs between documents.
+For each biomarker, include:
+- name
+- code if obvious, otherwise omit
+- numeric value
+- unit
+- referenceMin/referenceMax if visible
+- status if clearly high/low/normal from the report
+- flag if the report explicitly marks it
+Do not invent biomarkers that are not visible.
+If a range is shown as "<42" or ">90", convert that to referenceMax or referenceMin respectively.
+Also extract any visible patient identifier or specimen identifier when present so downstream systems can detect mixed-patient uploads.
+Provide educational context about what the visible biomarkers indicate.`,
 
       medical_document: `
 YOUR TASK: Analyze medical document images and extract relevant health information.
@@ -374,7 +426,25 @@ DO NOT diagnose skin conditions.`,
 OUTPUT FORMAT:
 Return a valid JSON object with this structure:
 {
-  "extractedData": { "biomarkerName": "value", ... },
+  "extractedData": {
+    "labName": "string or null",
+    "reportDate": "string or null",
+    "patientIdentifier": "string or null",
+    "specimenIdentifier": "string or null",
+    "fastingStatus": "fasting|non_fasting|unknown",
+    "biomarkers": [
+      {
+        "name": "HbA1c",
+        "code": "HBA1C",
+        "value": 35,
+        "unit": "mmol/mol",
+        "referenceMin": null,
+        "referenceMax": 42,
+        "status": "normal",
+        "flag": null
+      }
+    ]
+  },
   "summary": "Brief summary of findings",
   "observations": ["List of key observations"],
   "concerns": ["Any concerns that warrant professional attention"],
@@ -615,6 +685,101 @@ Return a valid JSON object with this structure:
       sections.push(`- Delivery Preference: ${data.preferences.deliveryPreference}`);
     }
 
+    if (data.rawResponses?.bloodTestSource) {
+      sections.push('### Blood Test Journey');
+      sections.push(
+        `- Source: ${
+          data.rawResponses.bloodTestSource === 'upload'
+            ? 'Uploaded existing blood test'
+            : 'Ordered through HealthPilot'
+        }`
+      );
+      sections.push(
+        `- Summary framing: ${
+          data.rawResponses.bloodTestSource === 'upload'
+            ? 'Keep the summary focused on interpreting the uploaded report with intake answers as supporting context.'
+            : 'Compare the detailed intake answers with the ordered blood test results and produce an in-depth combined recap.'
+        }`
+      );
+    }
+
+    if (data.rawResponses) {
+      sections.push('### Admin Intake Answers');
+      sections.push(JSON.stringify(data.rawResponses, null, 2));
+    }
+
+    return sections.join('\n');
+  }
+
+  private formatIntakeScoring(scoring: IntakeScoringContext): string {
+    const sections: string[] = ['## Intake Scoring Context'];
+    sections.push(`- Intake Assignment: ${scoring.assignment}`);
+    sections.push(`- Overall Score: ${scoring.overallScore}`);
+
+    if (scoring.riskBucket) {
+      sections.push(
+        `- Risk Bucket: ${scoring.riskBucket.label} (${scoring.riskBucket.minScore}-${scoring.riskBucket.maxScore})`
+      );
+      if (scoring.riskBucket.description) {
+        sections.push(`- Risk Interpretation: ${scoring.riskBucket.description}`);
+      }
+    }
+
+    if (scoring.summarySignals.length > 0) {
+      sections.push('### Scoring Signals');
+      scoring.summarySignals.forEach((signal) => {
+        sections.push(`- ${signal}`);
+      });
+    }
+
+    if (scoring.domains.length > 0) {
+      sections.push('### Domain Scores');
+      scoring.domains.forEach((domain) => {
+        sections.push(
+          `- ${domain.domainName}: weighted ${domain.weightedScore}, raw ${domain.rawScore}, weight ${domain.weight}`
+        );
+        domain.evidence.forEach((evidence) => {
+          sections.push(`  - Evidence: ${evidence}`);
+        });
+      });
+    }
+
+    if (scoring.tags && scoring.tags.length > 0) {
+      sections.push(`### Active Tags\n- ${scoring.tags.join('\n- ')}`);
+    }
+
+    if (scoring.includedPathways && scoring.includedPathways.length > 0) {
+      sections.push(`### Included Pathways\n- ${scoring.includedPathways.join('\n- ')}`);
+    }
+
+    if (scoring.excludedPathways && scoring.excludedPathways.length > 0) {
+      sections.push(`### Excluded Pathways\n- ${scoring.excludedPathways.join('\n- ')}`);
+    }
+
+    if (scoring.mappedHeadline) {
+      sections.push('### Output Mapping Headline');
+      sections.push(`- Headline: ${scoring.mappedHeadline.headline}`);
+      sections.push(`- Summary: ${scoring.mappedHeadline.summary}`);
+    }
+
+    if (scoring.mappedTagInsights && scoring.mappedTagInsights.length > 0) {
+      sections.push('### Output Mapping Tag Insights');
+      scoring.mappedTagInsights.forEach((insight) => {
+        sections.push(`- ${insight}`);
+      });
+    }
+
+    if (scoring.recommendationPriority && scoring.recommendationPriority.length > 0) {
+      sections.push('### Recommendation Priority Order');
+      scoring.recommendationPriority.forEach((priority, index) => {
+        sections.push(`- ${index + 1}. ${priority}`);
+      });
+    }
+
+    sections.push(
+      'Use this scoring context together with the intake answers and blood results. Respect the active tags, rule-triggered pathways, and output-mapping guidance when deciding which patterns deserve emphasis.'
+    );
+
     return sections.join('\n');
   }
 
@@ -649,12 +814,16 @@ Return a valid JSON object with this structure:
         healthSummary?: string;
         recommendations?: string[];
         warnings?: string[];
+        structuredSummary?: AIAnalysisResponse['structuredSummary'];
+        solutionPlan?: AIAnalysisResponse['solutionPlan'];
       };
 
       return {
         healthSummary: parsed.healthSummary || 'Unable to generate health summary.',
         recommendations: parsed.recommendations || [],
         warnings: parsed.warnings || ['This analysis is for educational purposes only.'],
+        ...(parsed.structuredSummary ? { structuredSummary: parsed.structuredSummary } : {}),
+        ...(parsed.solutionPlan ? { solutionPlan: parsed.solutionPlan } : {}),
       };
     } catch {
       // Try to extract JSON from the response
@@ -665,11 +834,15 @@ Return a valid JSON object with this structure:
             healthSummary?: string;
             recommendations?: string[];
             warnings?: string[];
+            structuredSummary?: AIAnalysisResponse['structuredSummary'];
+            solutionPlan?: AIAnalysisResponse['solutionPlan'];
           };
           return {
             healthSummary: parsed.healthSummary || text,
             recommendations: parsed.recommendations || [],
             warnings: parsed.warnings || [],
+            ...(parsed.structuredSummary ? { structuredSummary: parsed.structuredSummary } : {}),
+            ...(parsed.solutionPlan ? { solutionPlan: parsed.solutionPlan } : {}),
           };
         } catch {
           // Fall through to default

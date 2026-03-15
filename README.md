@@ -24,8 +24,8 @@ A med-tech distribution and orchestration platform that acts as a free entry poi
 │         │                                       │                            │
 │         ▼                                       ▼                            │
 │  ┌──────────────┐                        ┌──────────────┐                   │
-│  │  Anthropic   │                        │  Background  │                   │
-│  │  Claude AI   │                        │   Workers    │                   │
+│  │   OpenAI     │                        │  Background  │                   │
+│  │ AI Services  │                        │   Workers    │                   │
 │  └──────────────┘                        └──────────────┘                   │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
@@ -296,7 +296,9 @@ health-pilot-backend/
 │   │   └── user.repository.ts
 │   ├── services/               # Business logic
 │   │   ├── ai/
-│   │   │   └── anthropic.service.ts
+│   │   │   ├── ai-provider.factory.ts
+│   │   │   └── providers/
+│   │   │       └── openai.provider.ts
 │   │   └── cloudflare/
 │   │       └── cloudflare.service.ts
 │   ├── types/                  # TypeScript types

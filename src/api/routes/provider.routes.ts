@@ -9,6 +9,7 @@ import {
 } from '../middlewares/auth.middleware.js';
 import type { ApiResponse, AuthenticatedRequest, TreatmentCategory } from '../../types/index.js';
 import type { ProviderStatus } from '@prisma/client';
+import { isProviderCategory } from '../../constants/provider-categories.js';
 
 const router = Router();
 
@@ -41,6 +42,7 @@ router.get(
         id: true,
         name: true,
         slug: true,
+        category: true,
         status: true,
         supportedRegions: true,
         logoUrl: true,
@@ -131,6 +133,7 @@ router.get(
         id: true,
         name: true,
         slug: true,
+        category: true,
         description: true,
         logoUrl: true,
         websiteUrl: true,
@@ -280,6 +283,7 @@ router.post(
     const {
       name,
       slug,
+      category,
       description,
       logoUrl,
       websiteUrl,
@@ -297,6 +301,10 @@ router.post(
       subscriptionShare,
     } = (req as AuthenticatedRequest & { body: Record<string, unknown> }).body;
 
+    if (!isProviderCategory(category)) {
+      throw new ValidationError('Category is required');
+    }
+
     // Check if slug exists
     const existing = await prisma.provider.findUnique({
       where: { slug: slug as string },
@@ -310,6 +318,7 @@ router.post(
       data: {
         name: name as string,
         slug: slug as string,
+        category,
         description: (description as string) ?? null,
         logoUrl: (logoUrl as string) ?? null,
         websiteUrl: (websiteUrl as string) ?? null,
@@ -350,6 +359,10 @@ router.patch(
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
     const { id } = (req as AuthenticatedRequest & { params: { id: string } }).params;
     const updateData = (req as AuthenticatedRequest & { body: Record<string, unknown> }).body;
+
+    if (updateData.category !== undefined && updateData.category !== null && !isProviderCategory(updateData.category)) {
+      throw new ValidationError('Invalid provider category');
+    }
 
     const provider = await prisma.provider.update({
       where: { id },

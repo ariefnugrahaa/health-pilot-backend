@@ -126,29 +126,38 @@ router.get(
     }
 
     // Format treatment matches
-    const treatmentPathways = recommendation.treatmentMatches.map((match) => ({
-      treatmentId: match.treatmentId,
-      treatmentName: match.treatment.name,
-      category: match.treatment.category,
-      relevanceScore: Number(match.relevanceScore),
-      matchReasons: match.matchReasons,
-      contraindications: match.contraindications,
-      isEligible: match.isEligible,
-      provider: {
-        id: match.treatment.provider.id,
-        name: match.treatment.provider.name,
-        slug: match.treatment.provider.slug,
-        logoUrl: match.treatment.provider.logoUrl,
-      },
-      pricing: {
-        oneTime: match.treatment.priceOneTime ? Number(match.treatment.priceOneTime) : undefined,
-        subscription: match.treatment.priceSubscription
-          ? Number(match.treatment.priceSubscription)
-          : undefined,
-        subscriptionFrequency: match.treatment.subscriptionFrequency ?? undefined,
-        currency: match.treatment.currency,
-      },
-    }));
+    const treatmentPathways = recommendation.treatmentMatches.map((match) => {
+      const provider = match.treatment.provider ?? {
+        id: '',
+        name: 'Unknown Provider',
+        slug: 'unknown-provider',
+        logoUrl: null,
+      };
+
+      return {
+        treatmentId: match.treatmentId,
+        treatmentName: match.treatment.name,
+        category: match.treatment.category,
+        relevanceScore: Number(match.relevanceScore),
+        matchReasons: match.matchReasons,
+        contraindications: match.contraindications,
+        isEligible: match.isEligible,
+        provider: {
+          id: provider.id,
+          name: provider.name,
+          slug: provider.slug,
+          logoUrl: provider.logoUrl,
+        },
+        pricing: {
+          oneTime: match.treatment.priceOneTime ? Number(match.treatment.priceOneTime) : undefined,
+          subscription: match.treatment.priceSubscription
+            ? Number(match.treatment.priceSubscription)
+            : undefined,
+          subscriptionFrequency: match.treatment.subscriptionFrequency ?? undefined,
+          currency: match.treatment.currency,
+        },
+      };
+    });
 
     const response: ApiResponse<{
       id: string;

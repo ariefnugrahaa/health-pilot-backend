@@ -9,6 +9,8 @@ import {
   type PersonalizedFactor,
 } from '../../services/explanation/explanation.service.js';
 
+const mockGenerateExplanation = jest.fn();
+
 // Mock dependencies
 jest.mock('../../utils/database.js', () => ({
   prisma: {
@@ -34,19 +36,19 @@ jest.mock('../../utils/encryption.js', () => ({
   },
 }));
 
-jest.mock('../../services/ai/anthropic.service.js', () => ({
-  anthropicService: {
-    generateExplanation: jest.fn(),
+jest.mock('../../services/ai/ai-provider.factory.js', () => ({
+  AIProviderFactory: {
+    getProvider: jest.fn(() => ({
+      generateExplanation: mockGenerateExplanation,
+    })),
   },
 }));
 
 import { prisma } from '../../utils/database.js';
 import { encryptionService } from '../../utils/encryption.js';
-import { anthropicService } from '../../services/ai/anthropic.service.js';
 
 const mockPrisma = prisma as jest.Mocked<typeof prisma>;
 const mockEncryption = encryptionService as jest.Mocked<typeof encryptionService>;
-const mockAnthropic = anthropicService as jest.Mocked<typeof anthropicService>;
 
 describe('ExplanationService', () => {
   let service: ExplanationService;
@@ -182,7 +184,7 @@ describe('ExplanationService', () => {
       (mockPrisma.bloodTest.findMany as jest.Mock).mockResolvedValue([]);
       (mockPrisma.treatmentMatch.findMany as jest.Mock).mockResolvedValue([]);
       (mockEncryption.decrypt as jest.Mock).mockReturnValue(JSON.stringify(mockIntakeData));
-      (mockAnthropic.generateExplanation as jest.Mock).mockResolvedValue(
+      mockGenerateExplanation.mockResolvedValue(
         'This treatment works by optimizing hormone levels in a safe, monitored manner.'
       );
     });

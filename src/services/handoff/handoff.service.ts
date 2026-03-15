@@ -1,7 +1,7 @@
 import { prisma } from '../../utils/database.js';
 import { encryptionService } from '../../utils/encryption.js';
 import logger from '../../utils/logger.js';
-import { NotFoundError } from '../../api/middlewares/error.middleware.js';
+import { NotFoundError, ValidationError } from '../../api/middlewares/error.middleware.js';
 import { v4 as uuidv4 } from 'uuid';
 import type { HealthIntakeData, HandoffData } from '../../types/index.js';
 
@@ -41,6 +41,10 @@ export class HandoffService implements IHandoffService {
     if (!match.isEligible) {
       // Allow handoff but log warning? Or block?
       logger.warn('Handoff initiated for ineligible treatment', { userId, treatmentId });
+    }
+
+    if (!match.treatment.providerId) {
+      throw new ValidationError('Selected treatment is not linked to a provider');
     }
 
     // 3. Prepare Data Package (The "Packet")

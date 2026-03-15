@@ -1,7 +1,7 @@
 import logger from '../../utils/logger.js';
 import { prisma } from '../../utils/database.js';
 import { NotFoundError, ValidationError } from '../../api/middlewares/error.middleware.js';
-import { Prisma } from '@prisma/client';
+import { FieldType as PrismaFieldType, Prisma } from '@prisma/client';
 
 // ============================================
 // Types
@@ -202,6 +202,7 @@ const VALID_FIELD_TYPES = [
   'TEXTAREA',
   'PHONE',
   'BOOLEAN',
+  'BLOOD_TEST',
 ] as const;
 
 type NormalizedFieldType = (typeof VALID_FIELD_TYPES)[number];
@@ -891,7 +892,7 @@ export class IntakeFlowService implements IIntakeFlowService {
       data: {
         intakeFlowId: input.intakeFlowId,
         title: input.title,
-        description: input.description,
+        description: input.description ?? null,
         order: input.order,
         isOptional: input.isOptional ?? false,
       },
@@ -982,21 +983,29 @@ export class IntakeFlowService implements IIntakeFlowService {
     const normalizedOptions = normalizeFieldOptions(input.options);
     validateFieldOptions(normalizedType, normalizedOptions);
 
+    const createData: Prisma.IntakeFlowFieldUncheckedCreateInput = {
+      sectionId: input.sectionId,
+      fieldKey: input.fieldKey,
+      label: input.label,
+      type: normalizedType as PrismaFieldType,
+      placeholder: input.placeholder ?? null,
+      helperText: input.helperText ?? null,
+      isRequired: input.isRequired ?? true,
+      order: input.order,
+      validationRules:
+        input.validationRules !== undefined
+          ? (input.validationRules as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
+      options:
+        normalizedOptions !== undefined
+          ? (normalizedOptions as Prisma.InputJsonValue)
+          : Prisma.JsonNull,
+      dependsOnField: input.dependsOnField ?? null,
+      dependsOnValue: input.dependsOnValue ?? null,
+    };
+
     const field = await prisma.intakeFlowField.create({
-      data: {
-        sectionId: input.sectionId,
-        fieldKey: input.fieldKey,
-        label: input.label,
-        type: normalizedType,
-        placeholder: input.placeholder,
-        helperText: input.helperText,
-        isRequired: input.isRequired ?? true,
-        order: input.order,
-        validationRules: input.validationRules as Prisma.InputJsonValue,
-        options: normalizedOptions as Prisma.InputJsonValue,
-        dependsOnField: input.dependsOnField,
-        dependsOnValue: input.dependsOnValue,
-      },
+      data: createData,
     });
 
     return field;
@@ -1039,7 +1048,7 @@ export class IntakeFlowService implements IIntakeFlowService {
       updateData.label = input.label;
     }
     if (input.type !== undefined) {
-      updateData.type = effectiveType;
+      updateData.type = effectiveType as PrismaFieldType;
     }
     if (input.placeholder !== undefined) {
       updateData.placeholder = input.placeholder;

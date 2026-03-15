@@ -107,6 +107,7 @@ export interface HealthIntakeData {
   goals: HealthGoal[];
   lifestyle: LifestyleData;
   preferences: TreatmentPreferences;
+  rawResponses?: Record<string, unknown>;
 }
 
 export interface MedicalHistory {
@@ -173,6 +174,8 @@ export interface TreatmentPreferences {
 
 export interface BloodTestResult {
   biomarkerCode: string;
+  biomarkerName?: string;
+  biomarkerCategory?: string;
   value: number;
   unit: string;
   referenceMin?: number;
@@ -336,6 +339,45 @@ export interface AIAnalysisRequest {
   bloodTestResults?: BloodTestResult[];
   userAge?: number;
   userGender?: Gender;
+  intakeScoring?: IntakeScoringContext;
+}
+
+export interface IntakeScoringRiskBucket {
+  id: string;
+  label: string;
+  color: string;
+  description?: string;
+  minScore: number;
+  maxScore: number;
+}
+
+export interface IntakeScoringDomainResult {
+  domainId: string;
+  domainName: string;
+  rawScore: number;
+  weightedScore: number;
+  weight: number;
+  evidence: string[];
+}
+
+export interface IntakeScoringHeadlineMapping {
+  riskBucketId: string;
+  headline: string;
+  summary: string;
+}
+
+export interface IntakeScoringContext {
+  assignment: string;
+  overallScore: number;
+  domains: IntakeScoringDomainResult[];
+  summarySignals: string[];
+  riskBucket?: IntakeScoringRiskBucket;
+  tags?: string[];
+  includedPathways?: string[];
+  excludedPathways?: string[];
+  recommendationPriority?: string[];
+  mappedHeadline?: IntakeScoringHeadlineMapping;
+  mappedTagInsights?: string[];
 }
 
 // Next Step Recommendation - structured recommendation with effort level
@@ -349,11 +391,104 @@ export interface NextStepRecommendation {
   learnMoreUrl?: string;
 }
 
+export type SolutionCategoryId =
+  | 'LOW_ENERGY'
+  | 'DIGESTIVE_DISCOMFORT'
+  | 'POOR_SLEEP'
+  | 'WEIGHT_MANAGEMENT';
+
+export interface AISolutionCategory {
+  id: SolutionCategoryId;
+  label: string;
+  reason: string;
+}
+
+export interface AISolutionPlan {
+  strategyTitle: string;
+  strategySummary: string;
+  whyThisPlan: string[];
+  focusCategories: AISolutionCategory[];
+}
+
+export interface RecommendedSolutionProvider {
+  providerId: string;
+  providerName: string;
+  providerSlug: string;
+  providerDescription?: string;
+  providerWebsiteUrl?: string;
+  providerLogoUrl?: string;
+  supportedRegions: string[];
+  matchedCategoryIds: SolutionCategoryId[];
+  matchScore: number;
+  matchedTreatments: Array<{
+    treatmentId: string;
+    treatmentName: string;
+    treatmentCategory: string;
+    matchReasons: string[];
+  }>;
+}
+
+export interface RecommendedSolutionSupplement {
+  supplementId: string;
+  name: string;
+  slug: string;
+  category: string;
+  description?: string;
+  evidenceLevel?: string;
+  averagePrice?: number;
+  currency: string;
+  primaryBenefits: string[];
+  matchedCategoryIds: SolutionCategoryId[];
+  matchScore: number;
+  matchReason?: string;
+  expectedBenefit?: string;
+}
+
+export interface RecommendedSolutionCategory {
+  id: SolutionCategoryId;
+  label: string;
+  providerCount: number;
+  supplementCount: number;
+}
+
+export interface RecommendedSolutionsPayload {
+  solutionPlan: AISolutionPlan;
+  providerMatches: RecommendedSolutionProvider[];
+  supplementMatches: RecommendedSolutionSupplement[];
+  symptomCategories: RecommendedSolutionCategory[];
+}
+
+export interface StructuredSummarySignalGroup {
+  title: string;
+  items: string[];
+}
+
+export interface StructuredSummaryBiomarker {
+  biomarkerCode: string;
+  displayName: string;
+  value: number;
+  unit: string;
+  referenceRange: string;
+  status: 'IN_RANGE' | 'SLIGHTLY_HIGH' | 'SLIGHTLY_LOW';
+  detail: string;
+}
+
+export interface BloodEnhancedStructuredSummary {
+  plainLanguageSummary: string[];
+  responseSignals: StructuredSummarySignalGroup[];
+  bloodTestSignals: StructuredSummaryBiomarker[];
+  whatThisMayMean: string[];
+  limitationsAndBoundaries: string[];
+  nextActionLabel?: string;
+}
+
 export interface AIAnalysisResponse {
   healthSummary: string;
   recommendations: string[];
   warnings: string[];
   nextSteps?: NextStepRecommendation[];
+  solutionPlan?: AISolutionPlan;
+  structuredSummary?: BloodEnhancedStructuredSummary;
   tokensUsed: number;
   modelVersion: string;
   promptVersion: string;

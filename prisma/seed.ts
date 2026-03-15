@@ -68,7 +68,8 @@ type SeedField = {
     | 'CHECKBOX'
     | 'TEXTAREA'
     | 'PHONE'
-    | 'BOOLEAN';
+    | 'BOOLEAN'
+    | 'BLOOD_TEST';
   placeholder?: string;
   helperText?: string;
   isRequired?: boolean;
@@ -1442,7 +1443,7 @@ Return JSON with summary, keyFindings, and recommendations.`,
     name: 'Basic Intake',
     legacyNames: ['Basic Intake Demo'],
     description:
-      'A concise intake for new users covering goals, symptoms, lifestyle basics, and treatment preferences.',
+      'A concise intake for new users covering goals, symptoms, lifestyle basics, blood test availability, and treatment preferences.',
     status: 'ACTIVE',
     isDefault: true,
     assignedTo: 'Basic Intake',
@@ -1468,6 +1469,10 @@ Return JSON with summary, keyFindings, and recommendations.`,
             helperText: 'Choose the goal that best matches your visit.',
             isRequired: true,
             order: 1,
+            validationRules: {
+              choiceStyle: 'card-grid',
+              columns: 2,
+            },
             options: [
               { value: 'energy_vitality', label: 'Energy & Vitality' },
               { value: 'weight_management', label: 'Weight Management' },
@@ -1502,6 +1507,10 @@ Return JSON with summary, keyFindings, and recommendations.`,
             helperText: 'Select all that apply.',
             isRequired: false,
             order: 0,
+            validationRules: {
+              choiceStyle: 'card-grid',
+              columns: 2,
+            },
             options: [
               { value: 'fatigue', label: 'Fatigue' },
               { value: 'brain_fog', label: 'Brain Fog' },
@@ -1512,15 +1521,20 @@ Return JSON with summary, keyFindings, and recommendations.`,
           },
           {
             fieldKey: 'energy_rating',
-            label: 'How would you rate your current energy level?',
-            type: 'RADIO',
+            label: 'Energy Level',
+            helperText: 'Rate your average daily energy (1 = Constantly tired, 10 = Energised)',
+            type: 'NUMBER',
             isRequired: true,
             order: 1,
-            options: [
-              { value: 'low', label: 'Low' },
-              { value: 'medium', label: 'Medium' },
-              { value: 'high', label: 'High' },
-            ],
+            validationRules: {
+              renderAs: 'slider',
+              min: 1,
+              max: 10,
+              step: 1,
+              leftLabel: 'Constantly tired (1)',
+              rightLabel: 'Energised (10)',
+              showValue: true,
+            },
           },
           {
             fieldKey: 'appetite_pattern',
@@ -1547,44 +1561,96 @@ Return JSON with summary, keyFindings, and recommendations.`,
         fields: [
           {
             fieldKey: 'sleep_hours',
-            label: 'Average hours of sleep per night',
-            type: 'NUMBER',
-            placeholder: 'e.g. 7',
+            label: 'Average Sleep Duration (hours per night)',
+            type: 'SELECT',
             isRequired: true,
             order: 0,
-            validationRules: { min: 0, max: 14 },
+            options: [
+              { value: '4', label: '4' },
+              { value: '5', label: '5' },
+              { value: '6', label: '6' },
+              { value: '7', label: '7' },
+              { value: '8', label: '8' },
+              { value: '9', label: '9' },
+              { value: '10', label: '10' },
+            ],
+          },
+          {
+            fieldKey: 'sleep_quality',
+            label: 'Sleep Quality',
+            helperText: 'Rate your overall sleep quality (1 = Very poor, 10 = Excellent)',
+            type: 'NUMBER',
+            isRequired: true,
+            order: 1,
+            validationRules: {
+              renderAs: 'slider',
+              min: 1,
+              max: 10,
+              step: 1,
+              leftLabel: 'Very poor (1)',
+              rightLabel: 'Excellent (10)',
+              showValue: true,
+            },
           },
           {
             fieldKey: 'exercise_frequency',
-            label: 'How often do you exercise?',
-            type: 'SELECT',
+            label: 'Exercise Frequency',
+            type: 'RADIO',
             isRequired: true,
-            order: 1,
+            order: 2,
+            validationRules: {
+              choiceStyle: 'card-grid',
+              columns: 3,
+            },
             options: [
-              { value: 'rarely', label: 'Rarely' },
-              { value: '1_2_times', label: '1 to 2 times per week' },
-              { value: '3_4_times', label: '3 to 4 times per week' },
+              { value: 'sedentary', label: 'Sedentary (No exercise)' },
+              { value: '1_2_times', label: '1-2 times per week' },
+              { value: '3_4_times', label: '3-4 times per week' },
               { value: '5_plus_times', label: '5+ times per week' },
+              { value: 'daily', label: 'Daily' },
             ],
           },
           {
             fieldKey: 'stress_level',
-            label: 'Current stress level',
-            type: 'RADIO',
+            label: 'Stress Level',
+            helperText: 'Rate your typical stress level (1 = Very relaxed, 10 = Highly stressed)',
+            type: 'NUMBER',
             isRequired: true,
-            order: 2,
-            options: [
-              { value: 'mild', label: 'Mild' },
-              { value: 'moderate', label: 'Moderate' },
-              { value: 'high', label: 'High' },
-            ],
+            order: 3,
+            validationRules: {
+              renderAs: 'slider',
+              min: 1,
+              max: 10,
+              step: 1,
+              leftLabel: 'Very relaxed (1)',
+              rightLabel: 'Highly stressed (10)',
+              showValue: true,
+            },
+          },
+        ],
+      },
+      {
+        title: 'Blood Test & Health Data',
+        description:
+          'Let users upload recent results or branch into blood-test ordering from the basic intake.',
+        order: 3,
+        isOptional: true,
+        fields: [
+          {
+            fieldKey: 'basic_blood_test',
+            label: 'Blood test & health data',
+            type: 'BLOOD_TEST',
+            helperText:
+              'Upload recent blood test results for more accurate recommendations, or choose to order a test later.',
+            isRequired: false,
+            order: 0,
           },
         ],
       },
       {
         title: 'Treatment Preferences',
         description: 'Capture readiness and preferences for the next stage of care.',
-        order: 3,
+        order: 4,
         isOptional: true,
         fields: [
           {
@@ -1605,19 +1671,6 @@ Return JSON with summary, keyFindings, and recommendations.`,
             type: 'RADIO',
             isRequired: true,
             order: 1,
-            options: [
-              { value: 'yes', label: 'Yes' },
-              { value: 'no', label: 'No' },
-            ],
-          },
-          {
-            fieldKey: 'recent_lab_access',
-            label: 'Do you already have recent lab results available?',
-            type: 'RADIO',
-            isRequired: false,
-            order: 2,
-            dependsOnField: 'open_to_lab_testing',
-            dependsOnValue: 'yes',
             options: [
               { value: 'yes', label: 'Yes' },
               { value: 'no', label: 'No' },

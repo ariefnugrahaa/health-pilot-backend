@@ -12,6 +12,46 @@ import type { ApiResponse, AuthenticatedRequest } from '../../../types/index.js'
 
 const router = Router();
 const OPTION_BASED_FIELD_TYPES = new Set(['SELECT', 'MULTI_SELECT', 'RADIO', 'CHECKBOX']);
+const SUPPORTED_FIELD_TYPES = [
+  'TEXT',
+  'NUMBER',
+  'EMAIL',
+  'DATE',
+  'SELECT',
+  'MULTI_SELECT',
+  'RADIO',
+  'CHECKBOX',
+  'TEXTAREA',
+  'PHONE',
+  'BOOLEAN',
+  'BLOOD_TEST',
+] as const;
+
+const toValidationDetails = (req: AuthenticatedRequest): Array<{ field: string; message: string }> =>
+  validationResult(req).array().map((error) => {
+    if (error.type === 'field') {
+      return {
+        field: error.path,
+        message: String(error.msg),
+      };
+    }
+
+    return {
+      field: 'unknown',
+      message: String(error.msg),
+    };
+  });
+
+const assertUuidParam = (
+  value: string | string[] | undefined,
+  label: string,
+): string => {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new ValidationError(`Valid ${label} is required`, [{ field: label, message: 'Missing route parameter' }]);
+  }
+
+  return value;
+};
 
 const validateFieldOptionsForType = (typeRaw: unknown, options: unknown): void => {
   const type = String(typeRaw ?? '').toUpperCase();
@@ -112,19 +152,7 @@ const createFieldValidation = [
     .isLength({ min: 1, max: 100 })
     .withMessage('Field key is required'),
   body('label').isString().trim().isLength({ min: 1, max: 255 }).withMessage('Label is required'),
-  body('type').isIn([
-    'TEXT',
-    'NUMBER',
-    'EMAIL',
-    'DATE',
-    'SELECT',
-    'MULTI_SELECT',
-    'RADIO',
-    'CHECKBOX',
-    'TEXTAREA',
-    'PHONE',
-    'BOOLEAN',
-  ]),
+  body('type').isIn(SUPPORTED_FIELD_TYPES),
   body('placeholder').optional().isString().trim(),
   body('helperText').optional().isString().trim(),
   body('isRequired').optional().isBoolean(),
@@ -181,12 +209,12 @@ router.get(
   authenticate,
   param('id').isUUID(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { id } = req.params;
+    const id = assertUuidParam(req.params.id, 'id');
     const intakeFlow = await intakeFlowService.getIntakeFlow(id);
 
     const response: ApiResponse = {
@@ -208,9 +236,9 @@ router.post(
   authenticate,
   createIntakeFlowValidation,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
     const userId = req.user?.userId;
@@ -240,12 +268,12 @@ router.patch(
   param('id').isUUID(),
   updateIntakeFlowValidation,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { id } = req.params;
+    const id = assertUuidParam(req.params.id, 'id');
     const userId = req.user?.userId;
     if (!userId) {
       throw new NotFoundError('User');
@@ -272,12 +300,12 @@ router.delete(
   authenticate,
   param('id').isUUID(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { id } = req.params;
+    const id = assertUuidParam(req.params.id, 'id');
     await intakeFlowService.deleteIntakeFlow(id);
 
     const response: ApiResponse<null> = {
@@ -299,12 +327,12 @@ router.post(
   authenticate,
   param('id').isUUID(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { id } = req.params;
+    const id = assertUuidParam(req.params.id, 'id');
     const userId = req.user?.userId;
     if (!userId) {
       throw new NotFoundError('User');
@@ -331,12 +359,12 @@ router.post(
   authenticate,
   param('id').isUUID(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { id } = req.params;
+    const id = assertUuidParam(req.params.id, 'id');
     const userId = req.user?.userId;
     if (!userId) {
       throw new NotFoundError('User');
@@ -363,12 +391,12 @@ router.post(
   authenticate,
   param('id').isUUID(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { id } = req.params;
+    const id = assertUuidParam(req.params.id, 'id');
     const userId = req.user?.userId;
     if (!userId) {
       throw new NotFoundError('User');
@@ -399,12 +427,12 @@ router.get(
   authenticate,
   param('flowId').isUUID(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { flowId } = req.params;
+    const flowId = assertUuidParam(req.params.flowId, 'flowId');
     const sections = await intakeFlowService.getSections(flowId);
 
     const response: ApiResponse = {
@@ -426,9 +454,9 @@ router.post(
   authenticate,
   createSectionValidation,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
     const section = await intakeFlowService.createSection(req.body);
@@ -456,12 +484,12 @@ router.patch(
   body('order').optional().isInt(),
   body('isOptional').optional().isBoolean(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { id } = req.params;
+    const id = assertUuidParam(req.params.id, 'id');
     const section = await intakeFlowService.updateSection(id, req.body);
 
     const response: ApiResponse = {
@@ -483,12 +511,12 @@ router.delete(
   authenticate,
   param('id').isUUID(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { id } = req.params;
+    const id = assertUuidParam(req.params.id, 'id');
     await intakeFlowService.deleteSection(id);
 
     const response: ApiResponse<null> = {
@@ -510,9 +538,9 @@ router.post(
   authenticate,
   body('sectionIds').isArray({ min: 1 }),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
     const { sectionIds } = req.body;
@@ -541,12 +569,12 @@ router.get(
   authenticate,
   param('sectionId').isUUID(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { sectionId } = req.params;
+    const sectionId = assertUuidParam(req.params.sectionId, 'sectionId');
     const fields = await intakeFlowService.getFields(sectionId);
 
     const response: ApiResponse = {
@@ -568,9 +596,9 @@ router.post(
   authenticate,
   createFieldValidation,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
     const field = await intakeFlowService.createField(req.body);
@@ -596,19 +624,7 @@ router.patch(
   body('label').optional().isString().trim().isLength({ min: 1, max: 255 }),
   body('type')
     .optional()
-    .isIn([
-      'TEXT',
-      'NUMBER',
-      'EMAIL',
-      'DATE',
-      'SELECT',
-      'MULTI_SELECT',
-      'RADIO',
-      'CHECKBOX',
-      'TEXTAREA',
-      'PHONE',
-      'BOOLEAN',
-    ]),
+    .isIn(SUPPORTED_FIELD_TYPES),
   body('placeholder').optional().isString().trim(),
   body('helperText').optional().isString().trim(),
   body('isRequired').optional().isBoolean(),
@@ -618,12 +634,12 @@ router.patch(
   body('dependsOnField').optional().isString(),
   body('dependsOnValue').optional().isString(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { id } = req.params;
+    const id = assertUuidParam(req.params.id, 'id');
     const field = await intakeFlowService.updateField(id, req.body);
 
     const response: ApiResponse = {
@@ -645,12 +661,12 @@ router.delete(
   authenticate,
   param('id').isUUID(),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
-    const { id } = req.params;
+    const id = assertUuidParam(req.params.id, 'id');
     await intakeFlowService.deleteField(id);
 
     const response: ApiResponse<null> = {
@@ -672,9 +688,9 @@ router.post(
   authenticate,
   body('fieldIds').isArray({ min: 1 }),
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      throw new ValidationError('Validation failed', errors.array());
+    const validationDetails = toValidationDetails(req);
+    if (validationDetails.length > 0) {
+      throw new ValidationError('Validation failed', validationDetails);
     }
 
     const { fieldIds } = req.body;

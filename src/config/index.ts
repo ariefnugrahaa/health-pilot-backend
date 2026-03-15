@@ -29,21 +29,6 @@ const envSchema = z.object({
   ENCRYPTION_KEY: z.string().min(32),
   ENCRYPTION_ALGORITHM: z.string().default('aes-256-gcm'),
 
-  // AI Provider Selection
-  AI_PROVIDER: z.enum(['glm', 'anthropic', 'openai', 'mock']).default('openai'),
-
-  // Anthropic Claude AI
-  ANTHROPIC_API_KEY: z.string().optional(),
-  ANTHROPIC_MODEL: z.string().default('claude-sonnet-4-20250514'),
-  ANTHROPIC_MAX_TOKENS: z.string().transform(Number).default('4096'),
-
-  // GLM (ChatGLM/Zhipu AI)
-  GLM_API_KEY: z.string().optional(),
-  GLM_MODEL: z.string().default('glm-4-flash'),
-  GLM_API_URL: z.string().default('https://open.bigmodel.cn/api/paas/v4/chat/completions'),
-  GLM_MAX_TOKENS: z.string().transform(Number).default('4096'),
-  GLM_TIMEOUT: z.string().transform(Number).default('30000'),
-
   // OpenAI (supports both OPENAI_API_KEY and OPEN_AI_API_KEY)
   OPENAI_API_KEY: z.string().optional(),
   OPEN_AI_API_KEY: z.string().optional(), // Alternative naming
@@ -128,34 +113,13 @@ export const config = {
     algorithm: env.ENCRYPTION_ALGORITHM,
   },
 
-  // AI Provider Configuration
-  ai: {
-    provider: env.AI_PROVIDER,
-  },
-
-  // Anthropic Claude AI
-  anthropic: {
-    apiKey: env.ANTHROPIC_API_KEY,
-    model: env.ANTHROPIC_MODEL,
-    maxTokens: env.ANTHROPIC_MAX_TOKENS,
-  },
-
-  // GLM (ChatGLM/Zhipu AI)
-  glm: {
-    apiKey: env.GLM_API_KEY,
-    model: env.GLM_MODEL,
-    apiUrl: env.GLM_API_URL,
-    maxTokens: env.GLM_MAX_TOKENS,
-    timeout: env.GLM_TIMEOUT,
-  },
-
   // OpenAI
   openai: {
-    apiKey: env.OPENAI_API_KEY,
-    model: "gpt-4o",
-    visionModel: "gpt-4o",
-    maxTokens: 4096,
-    timeout: 60000,
+    apiKey: env.OPENAI_API_KEY || env.OPEN_AI_API_KEY,
+    model: env.OPENAI_MODEL,
+    visionModel: env.OPENAI_VISION_MODEL,
+    maxTokens: env.OPENAI_MAX_TOKENS,
+    timeout: env.OPENAI_TIMEOUT,
   },
 
   // Cloudflare

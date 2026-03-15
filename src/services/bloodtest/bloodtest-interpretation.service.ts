@@ -1,4 +1,4 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import { prisma } from '../../utils/database.js';
 import { encryptionService } from '../../utils/encryption.js';
 import { config } from '../../config/index.js';
@@ -59,15 +59,16 @@ export interface IBloodTestInterpretationService {
 // ============================================
 
 export class BloodTestInterpretationService implements IBloodTestInterpretationService {
-  private client: Anthropic;
+  private client: OpenAI;
   private readonly model: string;
   private readonly promptVersion = '1.0.0';
 
   constructor() {
-    this.client = new Anthropic({
-      apiKey: config.anthropic.apiKey,
+    this.client = new OpenAI({
+      apiKey: config.openai.apiKey || 'dummy-key',
+      timeout: config.openai.timeout,
     });
-    this.model = config.anthropic.model;
+    this.model = config.openai.model;
   }
 
   /**
@@ -250,23 +251,26 @@ export class BloodTestInterpretationService implements IBloodTestInterpretationS
     const systemPrompt = this.buildSystemPrompt();
     const userPrompt = this.buildUserPrompt(biomarkers, userContext);
 
-    const response = await this.client.messages.create({
+    const response = await this.client.chat.completions.create({
       model: this.model,
-      max_tokens: config.anthropic.maxTokens,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
+      max_tokens: config.openai.maxTokens,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      response_format: { type: 'json_object' },
     });
 
-    const content = response.content[0];
-    if (!content || content.type !== 'text') {
+    const content = response.choices[0]?.message?.content;
+    if (!content) {
       throw new Error('Unexpected response format from AI');
     }
 
-    const parsed = this.parseInterpretationResponse(content.text);
+    const parsed = this.parseInterpretationResponse(content);
 
     return {
       ...parsed,
-      tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
+      tokensUsed: response.usage?.total_tokens || 0,
       modelVersion: this.model,
     };
   }

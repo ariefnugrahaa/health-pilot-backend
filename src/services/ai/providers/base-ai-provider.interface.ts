@@ -124,9 +124,8 @@ export interface ReportGenerationResponse {
 }
 
 /**
- * Base interface for AI service providers
- * Enables switching between different AI providers (GLM, Anthropic, OpenAI, etc.)
- * via the factory pattern without changing application code
+ * Base interface for HealthPilot AI capabilities.
+ * The current runtime uses OpenAI through a single provider factory.
  */
 export interface IAIService {
   /**
@@ -169,7 +168,7 @@ export interface IAIService {
 
   /**
    * Get the name of the AI provider
-   * @returns Provider name (e.g., 'glm', 'anthropic', 'openai')
+   * @returns Provider name (currently 'openai')
    */
   getProviderName(): string;
 

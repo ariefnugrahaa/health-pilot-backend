@@ -9,6 +9,7 @@ import {
 } from '../../middlewares/error.middleware.js';
 import { authenticate, requireAdmin } from '../../middlewares/auth.middleware.js';
 import type { AuthenticatedRequest, ApiResponse, ProviderStatus } from '../../../types/index.js';
+import { PROVIDER_CATEGORY_VALUES } from '../../../constants/provider-categories.js';
 
 const router = Router();
 
@@ -23,6 +24,7 @@ const createProviderValidation = [
     .notEmpty()
     .matches(/^[a-z0-9-]+$/)
     .withMessage('Slug must be lowercase alphanumeric with hyphens'),
+  body('category').isIn(PROVIDER_CATEGORY_VALUES).withMessage('Valid category is required'),
   body('description').optional().isString(),
   body('logoUrl').optional().isURL(),
   body('websiteUrl').optional().isURL(),
@@ -37,6 +39,7 @@ const createProviderValidation = [
 
 const updateProviderValidation = [
   body('name').optional().isString().notEmpty(),
+  body('category').optional().isIn(PROVIDER_CATEGORY_VALUES).withMessage('Valid category is required'),
   body('description').optional().isString(),
   body('logoUrl').optional().isURL(),
   body('websiteUrl').optional().isURL(),
@@ -176,6 +179,7 @@ router.post(
     const {
       name,
       slug,
+      category,
       description,
       logoUrl,
       websiteUrl,
@@ -189,6 +193,7 @@ router.post(
     } = req.body as {
       name: string;
       slug: string;
+      category: string;
       description?: string;
       logoUrl?: string;
       websiteUrl?: string;
@@ -214,6 +219,7 @@ router.post(
       data: {
         name,
         slug,
+        category: category as never,
         description: description ?? null,
         logoUrl: logoUrl ?? null,
         websiteUrl: websiteUrl ?? null,
@@ -271,6 +277,7 @@ router.patch(
 
     const {
       name,
+      category,
       description,
       logoUrl,
       websiteUrl,
@@ -284,6 +291,7 @@ router.patch(
       status,
     } = req.body as {
       name?: string;
+      category?: string;
       description?: string;
       logoUrl?: string;
       websiteUrl?: string;
@@ -300,6 +308,9 @@ router.patch(
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) {
       updateData['name'] = name;
+    }
+    if (category !== undefined) {
+      updateData['category'] = category;
     }
     if (description !== undefined) {
       updateData['description'] = description;

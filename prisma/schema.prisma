@@ -80,6 +80,14 @@ enum ProviderStatus {
   INACTIVE
 }
 
+enum ProviderCategory {
+  LOW_ENERGY
+  DIGESTIVE_DISCOMFORT
+  POOR_SLEEP
+  GUT
+  WEIGHT_MANAGEMENT
+}
+
 enum TreatmentCategory {
   HORMONE_THERAPY
   WEIGHT_MANAGEMENT
@@ -128,6 +136,7 @@ enum FieldType {
   TEXTAREA
   PHONE
   BOOLEAN
+  BLOOD_TEST
 }
 
 enum AuditAction {
@@ -490,6 +499,7 @@ model Provider {
   id                String          @id @default(uuid()) @db.Uuid
   name              String
   slug              String          @unique
+  category          ProviderCategory?
   description       String?         @db.Text
   logoUrl           String?         @map("logo_url")
   websiteUrl        String?         @map("website_url")
@@ -538,6 +548,7 @@ model ProviderInvite {
   id          String      @id @default(uuid()) @db.Uuid
   email       String?
   token       String      @unique
+  category    ProviderCategory?
   expiresAt   DateTime    @map("expires_at")
   usedAt      DateTime?   @map("used_at")
   createdAt   DateTime    @default(now()) @map("created_at")

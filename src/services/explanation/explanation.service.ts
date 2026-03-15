@@ -2,7 +2,7 @@ import { prisma } from '../../utils/database.js';
 import { encryptionService } from '../../utils/encryption.js';
 import logger from '../../utils/logger.js';
 import { NotFoundError } from '../../api/middlewares/error.middleware.js';
-import { anthropicService } from '../ai/anthropic.service.js';
+import { AIProviderFactory } from '../ai/ai-provider.factory.js';
 import type { HealthIntakeData, BloodTestResult } from '../../types/index.js';
 
 // ============================================
@@ -349,7 +349,9 @@ export class ExplanationService implements IExplanationService {
         category: match.treatment.category,
         description: match.treatment.description,
         requiresBloodTest: match.treatment.requiresBloodTest,
-        provider: match.treatment.provider,
+        provider: {
+          name: match.treatment.provider?.name ?? 'Unknown Provider',
+        },
       },
       matchReasons: match.matchReasons,
       contraindications: match.contraindications,
@@ -587,7 +589,7 @@ export class ExplanationService implements IExplanationService {
    */
   private async generateHowItWorks(context: ExplanationContext): Promise<string> {
     try {
-      const response = await anthropicService.generateExplanation(
+      const response = await AIProviderFactory.getProvider().generateExplanation(
         `How ${context.treatment.name} works`,
         {
           category: context.treatment.category,

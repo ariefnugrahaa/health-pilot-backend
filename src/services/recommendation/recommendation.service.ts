@@ -155,40 +155,46 @@ export class RecommendationService implements IRecommendationService {
 
     // Map matches to TreatmentPathway
 
-    const treatmentPathways: TreatmentPathway[] = rec.treatmentMatches.map((m) => ({
-      treatmentId: m.treatmentId,
-      treatmentName: m.treatment.name,
-      category: m.treatment.category,
-      relevanceScore: Number(m.relevanceScore),
-      matchReasons: m.matchReasons,
-      contraindications: m.contraindications,
-      isEligible: m.isEligible,
-      providerName: m.treatment.provider.name,
-      providerId: m.treatment.providerId,
-      pricing: ((): {
-        currency: string;
-        oneTime?: number;
-        subscription?: number;
-        subscriptionFrequency?: string;
-      } => {
-        const p: {
+    const treatmentPathways: TreatmentPathway[] = rec.treatmentMatches.flatMap((m) => {
+      if (!m.treatment.provider || !m.treatment.providerId) {
+        return [];
+      }
+
+      return [{
+        treatmentId: m.treatmentId,
+        treatmentName: m.treatment.name,
+        category: m.treatment.category,
+        relevanceScore: Number(m.relevanceScore),
+        matchReasons: m.matchReasons,
+        contraindications: m.contraindications,
+        isEligible: m.isEligible,
+        providerName: m.treatment.provider.name,
+        providerId: m.treatment.providerId,
+        pricing: ((): {
           currency: string;
           oneTime?: number;
           subscription?: number;
           subscriptionFrequency?: string;
-        } = { currency: m.treatment.currency };
-        if (m.treatment.priceOneTime) {
-          p.oneTime = Number(m.treatment.priceOneTime);
-        }
-        if (m.treatment.priceSubscription) {
-          p.subscription = Number(m.treatment.priceSubscription);
-        }
-        if (m.treatment.subscriptionFrequency) {
-          p.subscriptionFrequency = m.treatment.subscriptionFrequency;
-        }
-        return p;
-      })(),
-    }));
+        } => {
+          const p: {
+            currency: string;
+            oneTime?: number;
+            subscription?: number;
+            subscriptionFrequency?: string;
+          } = { currency: m.treatment.currency };
+          if (m.treatment.priceOneTime) {
+            p.oneTime = Number(m.treatment.priceOneTime);
+          }
+          if (m.treatment.priceSubscription) {
+            p.subscription = Number(m.treatment.priceSubscription);
+          }
+          if (m.treatment.subscriptionFrequency) {
+            p.subscriptionFrequency = m.treatment.subscriptionFrequency;
+          }
+          return p;
+        })(),
+      }];
+    });
 
     return {
       healthSummary: {

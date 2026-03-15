@@ -448,6 +448,10 @@ export class TreatmentFeedbackService implements ITreatmentFeedbackService {
             return;
         }
 
+        if (!treatment.providerId) {
+            return;
+        }
+
         if (totalFeedback === 0) {
             await prisma.treatmentFeedbackSummary.upsert({
                 where: { treatmentId },

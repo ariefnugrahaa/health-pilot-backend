@@ -1,15 +1,16 @@
 import { Router, Response } from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import { randomBytes } from 'crypto';
+import type { ProviderCategory } from '@prisma/client';
 
 import { prisma } from '../../utils/database.js';
 import {
   asyncHandler,
   ValidationError,
-  NotFoundError,
 } from '../middlewares/error.middleware.js';
 import { authenticate, requireAdmin } from '../middlewares/auth.middleware.js';
 import type { AuthenticatedRequest, ApiResponse } from '../../types/index.js';
+import { PROVIDER_CATEGORY_VALUES, isProviderCategory } from '../../constants/provider-categories.js';
 
 const router = Router();
 
@@ -30,6 +31,7 @@ function getBaseUrl(): string {
 // ============================================
 
 const generateInviteValidation = [
+  body('category').optional().isIn(PROVIDER_CATEGORY_VALUES).withMessage('Valid category is required'),
   body('email').optional().isEmail().withMessage('Valid email is required if provided'),
   body('expiresInDays').optional().isInt({ min: 1, max: 90 }).withMessage('Expires in days must be between 1 and 90'),
   body('isReusable').optional().isBoolean().withMessage('isReusable must be a boolean'),
@@ -38,6 +40,7 @@ const generateInviteValidation = [
 
 const submitOnboardingValidation = [
   body('name').isString().notEmpty().withMessage('Provider name is required'),
+  body('category').optional().isIn(PROVIDER_CATEGORY_VALUES).withMessage('Valid category is required'),
   body('businessName').optional().isString(),
   body('providerType').isString().notEmpty().withMessage('Provider type is required'),
   body('description').optional().isString(),
@@ -80,7 +83,8 @@ router.post(
       );
     }
 
-    const { email, expiresInDays = 7, isReusable = false, notes } = req.body as {
+    const { category, email, expiresInDays = 7, isReusable = false, notes } = req.body as {
+      category?: ProviderCategory;
       email?: string;
       expiresInDays?: number;
       isReusable?: boolean;
@@ -105,6 +109,7 @@ router.post(
           inviteToken: string;
           inviteUrl: string;
           expiresAt: string;
+          category: string | null;
         }> = {
           success: true,
           data: {
@@ -112,6 +117,7 @@ router.post(
             inviteToken: existingInvite.token,
             inviteUrl,
             expiresAt: existingInvite.expiresAt.toISOString(),
+            category: existingInvite.category,
           },
           meta: { timestamp: new Date().toISOString() },
         };
@@ -129,8 +135,9 @@ router.post(
       data: {
         email: email?.toLowerCase() || null,
         token,
+        category: category ?? null,
         expiresAt,
-        createdById: req.user?.id || null,
+        createdById: req.user?.userId || null,
         isReusable,
         notes: notes || null,
       },
@@ -143,6 +150,7 @@ router.post(
       inviteToken: string;
       inviteUrl: string;
       expiresAt: string;
+      category: string | null;
     }> = {
       success: true,
       data: {
@@ -150,6 +158,7 @@ router.post(
         inviteToken: invite.token,
         inviteUrl,
         expiresAt: invite.expiresAt.toISOString(),
+        category: invite.category,
       },
       meta: { timestamp: new Date().toISOString() },
     };
@@ -166,7 +175,7 @@ router.get(
   '/list',
   authenticate,
   requireAdmin,
-  asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+  asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
     const invites = await prisma.providerInvite.findMany({
       where: {
         usedAt: null,
@@ -231,6 +240,7 @@ router.get(
       inviteId: string;
       email: string | null;
       expiresAt: string;
+      category: string | null;
     }> = {
       success: true,
       data: {
@@ -238,6 +248,7 @@ router.get(
         inviteId: invite.id,
         email: invite.email,
         expiresAt: invite.expiresAt.toISOString(),
+        category: invite.category,
       },
       meta: { timestamp: new Date().toISOString() },
     };
@@ -286,6 +297,11 @@ router.post(
       throw new ValidationError('This invite has expired');
     }
 
+    const category = formData.category || invite.category;
+    if (!isProviderCategory(category)) {
+      throw new ValidationError('Category is required');
+    }
+
     // Generate slug from provider name
     const baseSlug = formData.name
       .toLowerCase()
@@ -305,6 +321,7 @@ router.post(
       data: {
         name: formData.name,
         slug,
+        category,
         description: formData.description || null,
         logoUrl: formData.logoUrl || null,
         websiteUrl: formData.websiteUrl || null,

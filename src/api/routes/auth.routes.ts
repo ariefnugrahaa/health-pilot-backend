@@ -11,6 +11,7 @@ import {
   asyncHandler,
   ValidationError,
   AuthenticationError,
+  NotFoundError,
 } from '../middlewares/error.middleware.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import type {

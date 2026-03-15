@@ -9,6 +9,14 @@ import type { AuthenticatedRequest, TreatmentCategory } from '../../types/index.
 
 const router = Router();
 
+function getRequiredParam(value: string | string[] | undefined, field: string): string {
+    if (typeof value !== 'string' || value.length === 0) {
+        throw new ValidationError(`Valid ${field} is required`);
+    }
+
+    return value;
+}
+
 // ============================================
 // Admin Routes (Global Treatment Management)
 // ============================================
@@ -99,7 +107,7 @@ router.get(
     authenticate,
     requireAdmin,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const { id } = req.params;
+        const id = getRequiredParam(req.params.id, 'id');
 
         const [treatment, providers] = await Promise.all([
             prisma.treatment.findUnique({
@@ -253,7 +261,7 @@ router.patch(
     authenticate,
     requireAdmin,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const { id } = req.params;
+        const id = getRequiredParam(req.params.id, 'id');
         const updateData = req.body;
 
         // Remove immutable fields or handle separately if needed
@@ -285,7 +293,7 @@ router.delete(
     authenticate,
     requireAdmin,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const { id } = req.params;
+        const id = getRequiredParam(req.params.id, 'id');
 
         // Check if it has related data that prevents deletion?
         // For now, we allow deletion as cascade is configured in schema for some relations,
@@ -313,7 +321,7 @@ router.post(
     authenticate,
     requireAdmin,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const { id } = req.params;
+        const id = getRequiredParam(req.params.id, 'id');
         const {
             name,
             description,
@@ -387,7 +395,8 @@ router.patch(
     authenticate,
     requireAdmin,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const { id, ruleId } = req.params;
+        const id = getRequiredParam(req.params.id, 'id');
+        const ruleId = getRequiredParam(req.params.ruleId, 'ruleId');
         const updateData = req.body;
 
         // Verify ownership/existence
@@ -428,7 +437,8 @@ router.delete(
     authenticate,
     requireAdmin,
     asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const { id, ruleId } = req.params;
+        const id = getRequiredParam(req.params.id, 'id');
+        const ruleId = getRequiredParam(req.params.ruleId, 'ruleId');
 
         // Verify existence and link to treatment
         const rule = await prisma.matchingRule.findFirst({
@@ -451,4 +461,3 @@ router.delete(
 );
 
 export default router;
-

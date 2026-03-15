@@ -27,23 +27,54 @@ export interface AuditLogInput {
 // Audit Logger Implementation
 // ============================================
 class AuditLogger implements IAuditLogger {
+  private buildCreateData(entry: AuditLogInput, userId?: string): Prisma.AuditLogCreateInput {
+    return {
+      action: entry.action,
+      resourceType: entry.resourceType,
+      resourceId: entry.resourceId ?? null,
+      ipAddress: entry.ipAddress ?? null,
+      userAgent: entry.userAgent ?? null,
+      ...(userId ? { user: { connect: { id: userId } } } : {}),
+      ...(entry.metadata && { metadata: entry.metadata as Prisma.InputJsonValue }),
+    };
+  }
+
   /**
    * Log an audit entry
    */
   async log(entry: AuditLogInput): Promise<void> {
     try {
       await prisma.auditLog.create({
-        data: {
-          userId: entry.userId ?? null,
-          action: entry.action,
-          resourceType: entry.resourceType,
-          resourceId: entry.resourceId ?? null,
-          ipAddress: entry.ipAddress ?? null,
-          userAgent: entry.userAgent ?? null,
-          ...(entry.metadata && { metadata: entry.metadata as Prisma.InputJsonValue }),
-        },
+        data: this.buildCreateData(entry, entry.userId),
       });
     } catch (error) {
+      const prismaError = error as { code?: string };
+
+      // If the referenced user no longer exists, preserve the audit row without the FK.
+      if (entry.userId && (prismaError.code === 'P2003' || prismaError.code === 'P2025')) {
+        try {
+          await prisma.auditLog.create({
+            data: this.buildCreateData(
+              {
+                ...entry,
+                metadata: {
+                  ...(entry.metadata ?? {}),
+                  droppedInvalidUserId: entry.userId,
+                },
+              },
+              undefined
+            ),
+          });
+          return;
+        } catch (retryError) {
+          logger.error('Failed to create audit log after retrying without user', {
+            error: retryError,
+            entry,
+          });
+          return;
+        }
+      }
+
       // Don't fail the request if audit logging fails
       logger.error('Failed to create audit log', { error, entry });
     }

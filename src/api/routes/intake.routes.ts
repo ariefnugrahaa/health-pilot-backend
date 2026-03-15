@@ -4,11 +4,30 @@ import { body, validationResult } from 'express-validator';
 import { prisma } from '../../utils/database.js';
 import { encryptionService } from '../../utils/encryption.js';
 import logger from '../../utils/logger.js';
-import { asyncHandler, ValidationError, NotFoundError } from '../middlewares/error.middleware.js';
+import {
+  asyncHandler,
+  ValidationError,
+  NotFoundError,
+  AuthenticationError,
+} from '../middlewares/error.middleware.js';
 import { authenticate, optionalAuth } from '../middlewares/auth.middleware.js';
-import { auditPhiAccess, auditPhiModification } from '../middlewares/audit.middleware.js';
+import { auditPhiModification } from '../middlewares/audit.middleware.js';
 import { AIProviderFactory } from '../../services/ai/ai-provider.factory.js';
-import type { ApiResponse, AuthenticatedRequest, HealthIntakeData, AIAnalysisRequest } from '../../types/index.js';
+import { buildBloodEnhancedStructuredSummary } from '../../services/ai/blood-enhanced-summary.service.js';
+import type { IntakeFlowScoringConfig } from '../../services/intake-flow/intake-flow.service.js';
+import { buildIntakeScoringContext } from '../../services/intake-flow/intake-scoring.service.js';
+import { matchingService } from '../../services/matching/matching.service.js';
+import { supplementService } from '../../services/supplement/supplement.service.js';
+import { recommendedSolutionsService } from '../../services/recommendation/recommended-solutions.service.js';
+import type {
+  ApiResponse,
+  AuthenticatedRequest,
+  HealthIntakeData,
+  AIAnalysisRequest,
+  BloodTestResult,
+  BloodEnhancedStructuredSummary,
+  RecommendedSolutionsPayload,
+} from '../../types/index.js';
 
 const router = Router();
 
@@ -37,6 +56,8 @@ const mapFieldTypeToStepType = (fieldType: string): string => {
       return 'phone';
     case 'BOOLEAN':
       return 'boolean';
+    case 'BLOOD_TEST':
+      return 'blood_test';
     default:
       return 'text';
   }
@@ -66,6 +87,84 @@ const toStepOptions = (options: unknown): Array<{
       };
     });
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const extractReferencedBloodTestIds = (rawResponses: unknown): string[] => {
+  if (!isRecord(rawResponses)) {
+    return [];
+  }
+
+  const ids = new Set<string>();
+
+  for (const [key, value] of Object.entries(rawResponses)) {
+    if (key === 'bloodTestId' && typeof value === 'string' && value.trim().length > 0) {
+      ids.add(value.trim());
+      continue;
+    }
+
+    if (!isRecord(value)) {
+      continue;
+    }
+
+    const uploadedTestId = value.uploadedTestId;
+    if (typeof uploadedTestId === 'string' && uploadedTestId.trim().length > 0) {
+      ids.add(uploadedTestId.trim());
+    }
+
+    const nestedBloodTestId = value.bloodTestId;
+    if (typeof nestedBloodTestId === 'string' && nestedBloodTestId.trim().length > 0) {
+      ids.add(nestedBloodTestId.trim());
+    }
+  }
+
+  return Array.from(ids);
+};
+
+const extractIntakeAssignment = (rawResponses: unknown): string | undefined => {
+  if (!isRecord(rawResponses)) {
+    return undefined;
+  }
+
+  const assignment = rawResponses.intakeAssignment;
+  return typeof assignment === 'string' && assignment.trim().length > 0
+    ? assignment.trim()
+    : undefined;
+};
+
+const getIntakeFlowForAssignment = async (assignedTo: string) => {
+  const activeFlow = await prisma.intakeFlow.findFirst({
+    where: {
+      status: 'ACTIVE',
+      assignedTo,
+    },
+    orderBy: [{ updatedAt: 'desc' }],
+    select: {
+      assignedTo: true,
+      scoringConfig: true,
+    },
+  });
+
+  if (activeFlow) {
+    return activeFlow;
+  }
+
+  return prisma.intakeFlow.findFirst({
+    where: { assignedTo },
+    orderBy: [
+      { status: 'asc' },
+      { updatedAt: 'desc' },
+    ],
+    select: {
+      assignedTo: true,
+      scoringConfig: true,
+    },
+  });
+};
+
+const getIntakeSummaryType = (bloodTestId?: string | null): 'blood_test' | 'guided_health_check' =>
+  bloodTestId ? 'blood_test' : 'guided_health_check';
 
 // ============================================
 // Validation Rules
@@ -187,6 +286,17 @@ router.post(
 
     let userId = req.user?.userId;
 
+    if (userId) {
+      const existingUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true },
+      });
+
+      if (!existingUser) {
+        throw new AuthenticationError('Authenticated user not found. Please sign in again.');
+      }
+    }
+
     // Create anonymous user if not authenticated
     if (!userId) {
       const anonymousUser = await prisma.user.create({
@@ -259,7 +369,7 @@ router.post(
 
     const bmi = (height && weight) ? weight / ((height / 100) * (height / 100)) : undefined;
 
-    const intakeData: HealthIntakeData & { rawResponses?: Record<string, unknown> } = {
+    const intakeData: HealthIntakeData = {
       biometrics: {
         height,
         weight,
@@ -349,6 +459,16 @@ router.get(
     const intake = await prisma.healthIntake.findFirst({
       where: whereClause,
       include: {
+        bloodTests: {
+          select: {
+            id: true,
+          },
+          orderBy: [
+            { resultsReceivedAt: 'desc' },
+            { createdAt: 'desc' },
+          ],
+          take: 1,
+        },
         recommendations: {
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -368,6 +488,8 @@ router.get(
     // Parse recommendation data if available
     let recommendationData = null;
     const latestRecommendation = intake.recommendations?.[0];
+    const latestBloodTest = intake.bloodTests?.[0] ?? null;
+    const bloodTestId = latestBloodTest?.id ?? null;
     if (latestRecommendation) {
       const decryptedRecommendation = JSON.parse(
         encryptionService.decrypt(latestRecommendation.healthSummaryEncrypted)
@@ -378,6 +500,8 @@ router.get(
         actions: decryptedRecommendation.recommendations,
         warnings: decryptedRecommendation.warnings,
         nextSteps: decryptedRecommendation.nextSteps,
+        recommendedSolutions: decryptedRecommendation.recommendedSolutions,
+        structuredSummary: decryptedRecommendation.structuredSummary,
       };
     }
 
@@ -388,6 +512,8 @@ router.get(
       recommendation: typeof recommendationData;
       createdAt: Date;
       updatedAt: Date;
+      type: 'blood_test' | 'guided_health_check';
+      bloodTestId: string | null;
     }> = {
       success: true,
       data: {
@@ -397,6 +523,8 @@ router.get(
         recommendation: recommendationData,
         createdAt: intake.createdAt,
         updatedAt: intake.updatedAt,
+        type: getIntakeSummaryType(bloodTestId),
+        bloodTestId,
       },
       meta: { timestamp: new Date().toISOString() },
     };
@@ -447,7 +575,7 @@ router.patch(
     // Merge with existing data
     const existingData = JSON.parse(
       encryptionService.decrypt(existingIntake.intakeDataEncrypted)
-    ) as HealthIntakeData;
+    ) as HealthIntakeData & { rawResponses?: Record<string, unknown> };
 
     const newData = (req as AuthenticatedRequest & { body: Partial<HealthIntakeData> }).body;
     const mergedData: HealthIntakeData = {
@@ -572,6 +700,66 @@ router.post(
       aiRequest.userGender = userGender;
     }
 
+    const referencedBloodTestIds = extractReferencedBloodTestIds(decryptedData.rawResponses);
+    let linkedBloodTestResults: BloodTestResult[] = [];
+    if (referencedBloodTestIds.length > 0) {
+      const referencedBloodTests = await prisma.bloodTest.findMany({
+        where: {
+          id: { in: referencedBloodTestIds },
+          userId,
+          status: 'COMPLETED',
+        },
+        include: {
+          biomarkerResults: {
+            include: {
+              biomarker: true,
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+        orderBy: [
+          { resultsReceivedAt: 'desc' },
+          { createdAt: 'desc' },
+        ],
+      });
+
+      const latestCompletedBloodTest = referencedBloodTests.find(
+        (bloodTest) => bloodTest.biomarkerResults.length > 0,
+      );
+
+      if (latestCompletedBloodTest) {
+        linkedBloodTestResults = latestCompletedBloodTest.biomarkerResults.map((result) => ({
+          biomarkerCode: result.biomarker.code,
+          biomarkerName: result.biomarker.name,
+          value: Number(result.value),
+          unit: result.unit,
+          ...(result.referenceMin !== null ? { referenceMin: Number(result.referenceMin) } : {}),
+          ...(result.referenceMax !== null ? { referenceMax: Number(result.referenceMax) } : {}),
+          isAbnormal: result.isAbnormal,
+        }));
+        aiRequest.bloodTestResults = linkedBloodTestResults;
+      }
+    }
+
+    let intakeScoring: import('../../types/index.js').IntakeScoringContext | undefined;
+
+    const intakeAssignment = extractIntakeAssignment(decryptedData.rawResponses);
+    if (intakeAssignment) {
+      const intakeFlow = await getIntakeFlowForAssignment(intakeAssignment);
+      if (intakeFlow?.assignedTo && intakeFlow.scoringConfig) {
+        intakeScoring = buildIntakeScoringContext(
+          intakeFlow.assignedTo,
+          intakeFlow.scoringConfig as IntakeFlowScoringConfig,
+          decryptedData,
+          linkedBloodTestResults,
+        );
+
+        if (intakeScoring) {
+          aiRequest.intakeScoring = intakeScoring;
+        }
+      }
+    }
+
     // 5. Call AI provider to generate health summary
     let aiResponse: import('../../types/index.js').AIAnalysisResponse;
     try {
@@ -598,7 +786,34 @@ router.post(
       );
     }
 
-    // 5. Store AI-generated summary in Recommendation table
+    const treatmentMatches = await matchingService.findMatches({
+      user: intake.user,
+      intake: decryptedData,
+      ...(aiRequest.bloodTestResults ? { bloodTests: aiRequest.bloodTestResults } : {}),
+    });
+
+    const supplementMatches = await supplementService.getSupplementRecommendationsForIntake(
+      decryptedData,
+      userAge ?? null,
+      userGender ?? null,
+    );
+
+    const recommendedSolutions = await recommendedSolutionsService.buildPayload(
+      aiResponse.solutionPlan,
+      treatmentMatches,
+      supplementMatches,
+    );
+    const structuredSummary: BloodEnhancedStructuredSummary | undefined =
+      linkedBloodTestResults.length > 0
+        ? buildBloodEnhancedStructuredSummary(
+            aiResponse,
+            decryptedData,
+            linkedBloodTestResults,
+            intakeScoring,
+          )
+        : aiResponse.structuredSummary;
+
+    // 6. Store AI-generated summary in Recommendation table
     logger.info('Creating recommendation record', { userId, intakeId });
 
     if (!userId) {
@@ -616,6 +831,8 @@ router.post(
             recommendations: aiResponse.recommendations,
             warnings: aiResponse.warnings,
             nextSteps: aiResponse.nextSteps,
+            recommendedSolutions,
+            ...(structuredSummary ? { structuredSummary } : {}),
           })
         ),
         primaryRecommendations: aiResponse.recommendations.slice(0, 3),
@@ -625,7 +842,7 @@ router.post(
       },
     });
 
-    // 6. Update intake status to COMPLETED
+    // 7. Update intake status to COMPLETED
     const updatedIntake = await prisma.healthIntake.update({
       where: { id: intakeId },
       data: {
@@ -640,7 +857,7 @@ router.post(
       recommendationId: recommendation.id,
     });
 
-    // 7. Return recommendation data to frontend
+    // 8. Return recommendation data to frontend
     const response: ApiResponse<{
       intakeId: string;
       status: string;
@@ -650,6 +867,8 @@ router.post(
       recommendations: string[];
       warnings: string[];
       nextSteps?: typeof aiResponse.nextSteps;
+      recommendedSolutions: RecommendedSolutionsPayload;
+      structuredSummary?: BloodEnhancedStructuredSummary;
     }> = {
       success: true,
       data: {
@@ -660,7 +879,9 @@ router.post(
         healthSummary: aiResponse.healthSummary,
         recommendations: aiResponse.recommendations,
         warnings: aiResponse.warnings,
-        nextSteps: aiResponse.nextSteps,
+        recommendedSolutions,
+        ...(structuredSummary ? { structuredSummary } : {}),
+        ...(aiResponse.nextSteps ? { nextSteps: aiResponse.nextSteps } : {}),
       },
       meta: { timestamp: new Date().toISOString() },
     };
@@ -692,13 +913,39 @@ router.get(
         completedAt: true,
         createdAt: true,
         updatedAt: true,
+        bloodTests: {
+          select: {
+            id: true,
+          },
+          orderBy: [
+            { resultsReceivedAt: 'desc' },
+            { createdAt: 'desc' },
+          ],
+          take: 1,
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    const response: ApiResponse<typeof intakes> = {
+    const responseData = intakes.map((intake) => {
+      const bloodTestId = intake.bloodTests[0]?.id ?? null;
+
+      return {
+        id: intake.id,
+        status: intake.status,
+        primaryGoals: intake.primaryGoals,
+        version: intake.version,
+        completedAt: intake.completedAt,
+        createdAt: intake.createdAt,
+        updatedAt: intake.updatedAt,
+        type: getIntakeSummaryType(bloodTestId),
+        bloodTestId,
+      };
+    });
+
+    const response: ApiResponse<typeof responseData> = {
       success: true,
-      data: intakes,
+      data: responseData,
       meta: { timestamp: new Date().toISOString() },
     };
 

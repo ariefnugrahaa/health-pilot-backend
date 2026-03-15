@@ -1,7 +1,8 @@
 import { Router, type Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../../utils/database.js';
 import { authenticate } from '../../middlewares/auth.middleware.js';
-import { asyncHandler } from '../../middlewares/error.middleware.js';
+import { asyncHandler, ValidationError } from '../../middlewares/error.middleware.js';
 import type { AuthenticatedRequest } from '../../../types/index.js';
 
 const router = Router();
@@ -9,23 +10,6 @@ const router = Router();
 // ============================================
 // Types
 // ============================================
-
-interface SupplementListItem {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  category: string;
-  isActive: boolean;
-  affiliateLinks: Record<string, string> | null;
-  targetSymptoms: string[];
-  targetGoals: string[];
-  createdAt: string;
-  updatedAt: string;
-  _count?: {
-    supplementMatches: number;
-  };
-}
 
 interface CreateSupplementPayload {
   name: string;
@@ -57,6 +41,14 @@ interface CreateSupplementPayload {
 // GET /api/admin/supplements
 // List all supplements with filters
 // ============================================
+function getRequiredParam(value: string | string[] | undefined, field: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new ValidationError(`Valid ${field} is required`);
+  }
+
+  return value;
+}
+
 router.get(
   '/',
   authenticate,
@@ -125,7 +117,7 @@ router.get(
   '/:id',
   authenticate,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
+    const id = getRequiredParam(req.params.id, 'id');
 
     const supplement = await prisma.supplement.findUnique({
       where: { id },
@@ -191,7 +183,9 @@ router.post(
         interactions: payload.interactions || [],
         sideEffects: payload.sideEffects || [],
         safetyNotes: payload.safetyNotes || null,
-        affiliateLinks: payload.affiliateLinks || null,
+        ...(payload.affiliateLinks
+          ? { affiliateLinks: payload.affiliateLinks as Prisma.InputJsonValue }
+          : {}),
         averagePrice: payload.averagePrice ?? null,
         currency: payload.currency || 'GBP',
         isActive: payload.isActive ?? true,
@@ -214,7 +208,7 @@ router.patch(
   '/:id',
   authenticate,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
+    const id = getRequiredParam(req.params.id, 'id');
     const payload: Partial<CreateSupplementPayload> = req.body;
 
     // Check if supplement exists
@@ -266,7 +260,9 @@ router.patch(
     if (payload.interactions !== undefined) updateData.interactions = payload.interactions;
     if (payload.sideEffects !== undefined) updateData.sideEffects = payload.sideEffects;
     if (payload.safetyNotes !== undefined) updateData.safetyNotes = payload.safetyNotes;
-    if (payload.affiliateLinks !== undefined) updateData.affiliateLinks = payload.affiliateLinks;
+    if (payload.affiliateLinks !== undefined) {
+      updateData.affiliateLinks = payload.affiliateLinks as Prisma.InputJsonValue;
+    }
     if (payload.averagePrice !== undefined) updateData.averagePrice = payload.averagePrice;
     if (payload.currency !== undefined) updateData.currency = payload.currency;
     if (payload.isActive !== undefined) updateData.isActive = payload.isActive;
@@ -292,7 +288,7 @@ router.delete(
   '/:id',
   authenticate,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
+    const id = getRequiredParam(req.params.id, 'id');
 
     // Check if supplement exists
     const existing = await prisma.supplement.findUnique({

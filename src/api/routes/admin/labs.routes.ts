@@ -1,7 +1,8 @@
 import { Router, type Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../../utils/database.js';
 import { authenticate } from '../../middlewares/auth.middleware.js';
-import { asyncHandler } from '../../middlewares/error.middleware.js';
+import { asyncHandler, ValidationError } from '../../middlewares/error.middleware.js';
 import type { AuthenticatedRequest } from '../../../types/index.js';
 
 const router = Router();
@@ -14,26 +15,6 @@ interface OperatingDay {
   day: string;
   capacity: number;
   timeSlots: { start: string; end: string }[];
-}
-
-interface LabResponse {
-  id: string;
-  name: string;
-  city: string;
-  state: string;
-  address: string | null;
-  serviceTypes: string[];
-  resultTimeDays: number;
-  isActive: boolean;
-  operatingDays: OperatingDay[];
-  autoConfirmBooking: boolean;
-  allowReschedule: boolean;
-  cancellationWindowHours: number | null;
-  requireManualConfirmation: boolean;
-  createdAt: Date;
-  updatedAt: Date;
-  totalWeeklyCapacity?: number;
-  bookingsCount?: number;
 }
 
 interface CreateLabPayload {
@@ -56,6 +37,18 @@ interface CreateLabPayload {
 // ============================================
 function calculateTotalWeeklyCapacity(operatingDays: OperatingDay[]): number {
   return operatingDays.reduce((total, day) => total + day.capacity, 0);
+}
+
+function getRequiredParam(value: string | string[] | undefined, field: string): string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new ValidationError(`Valid ${field} is required`);
+  }
+
+  return value;
+}
+
+function toOperatingDays(value: unknown): OperatingDay[] {
+  return Array.isArray(value) ? (value as unknown as OperatingDay[]) : [];
 }
 
 // ============================================
@@ -97,7 +90,8 @@ router.get(
     });
 
     const data = labs.map((lab) => {
-      const operatingDays = lab.operatingDays as OperatingDay[];
+      const operatingDays = toOperatingDays(lab.operatingDays);
+      const bookingsCount = (lab as typeof lab & { _count: { bookings: number } })._count.bookings;
       return {
         id: lab.id,
         name: lab.name,
@@ -119,7 +113,7 @@ router.get(
         serviceType: lab.serviceTypes.includes('HOME_VISIT') ? 'Home visit available' : 'On-site only',
         resultTime: `${lab.resultTimeDays}-${lab.resultTimeDays + 2} days`,
         slotsConfigured: `${calculateTotalWeeklyCapacity(operatingDays)} total weekly capacity`,
-        bookingsCount: lab._count.bookings,
+        bookingsCount,
       };
     });
 
@@ -139,7 +133,7 @@ router.get(
   '/:id',
   authenticate,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
+    const id = getRequiredParam(req.params.id, 'id');
 
     const lab = await prisma.lab.findUnique({
       where: { id },
@@ -158,7 +152,8 @@ router.get(
       return;
     }
 
-    const operatingDays = lab.operatingDays as OperatingDay[];
+    const operatingDays = toOperatingDays(lab.operatingDays);
+    const bookingsCount = (lab as typeof lab & { _count: { bookings: number } })._count.bookings;
 
     res.json({
       success: true,
@@ -166,7 +161,7 @@ router.get(
         ...lab,
         operatingDays,
         totalWeeklyCapacity: calculateTotalWeeklyCapacity(operatingDays),
-        bookingsCount: lab._count.bookings,
+        bookingsCount,
       },
       meta: { timestamp: new Date().toISOString() },
     });
@@ -192,7 +187,7 @@ router.post(
         serviceTypes: payload.serviceTypes || ['ON_SITE'],
         resultTimeDays: payload.resultTimeDays ?? 3,
         isActive: payload.isActive ?? true,
-        operatingDays: payload.operatingDays || [],
+        operatingDays: ((payload.operatingDays ?? []) as unknown) as Prisma.InputJsonValue,
         autoConfirmBooking: payload.autoConfirmBooking ?? true,
         allowReschedule: payload.allowReschedule ?? true,
         cancellationWindowHours: payload.cancellationWindowHours ?? 24,
@@ -216,7 +211,7 @@ router.patch(
   '/:id',
   authenticate,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
+    const id = getRequiredParam(req.params.id, 'id');
     const payload: Partial<CreateLabPayload> = req.body;
 
     // Check if lab exists
@@ -242,7 +237,9 @@ router.patch(
     if (payload.serviceTypes !== undefined) updateData.serviceTypes = payload.serviceTypes;
     if (payload.resultTimeDays !== undefined) updateData.resultTimeDays = payload.resultTimeDays;
     if (payload.isActive !== undefined) updateData.isActive = payload.isActive;
-    if (payload.operatingDays !== undefined) updateData.operatingDays = payload.operatingDays;
+    if (payload.operatingDays !== undefined) {
+      updateData.operatingDays = (payload.operatingDays as unknown) as Prisma.InputJsonValue;
+    }
     if (payload.autoConfirmBooking !== undefined) updateData.autoConfirmBooking = payload.autoConfirmBooking;
     if (payload.allowReschedule !== undefined) updateData.allowReschedule = payload.allowReschedule;
     if (payload.cancellationWindowHours !== undefined) updateData.cancellationWindowHours = payload.cancellationWindowHours;
@@ -269,7 +266,7 @@ router.delete(
   '/:id',
   authenticate,
   asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
+    const id = getRequiredParam(req.params.id, 'id');
 
     // Check if lab exists
     const existing = await prisma.lab.findUnique({
@@ -290,7 +287,8 @@ router.delete(
     }
 
     // Check if lab has bookings
-    if (existing._count.bookings > 0) {
+    const bookingsCount = (existing as typeof existing & { _count: { bookings: number } })._count.bookings;
+    if (bookingsCount > 0) {
       res.status(400).json({
         success: false,
         error: { code: 'HAS_BOOKINGS', message: 'Cannot delete lab with existing bookings. Deactivate instead.' },

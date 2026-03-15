@@ -225,8 +225,9 @@ router.post(
   '/uploads',
   authenticate,
   [
-    body('fileNames').isArray({ min: 1 }).withMessage('At least one uploaded file is required'),
-    body('fileNames.*').isString().notEmpty().withMessage('Uploaded file name is required'),
+    body('files').isArray({ min: 1 }).withMessage('At least one uploaded file is required'),
+    body('files.*.fileName').isString().notEmpty().withMessage('Uploaded file name is required'),
+    body('files.*.mimeType').isString().notEmpty().withMessage('Uploaded file mime type is required'),
     body('panelType')
       .optional()
       .isIn(['targeted', 'goal-based', 'comprehensive'])
@@ -250,13 +251,22 @@ router.post(
       throw new Error('User not found');
     }
 
-    const { fileNames, panelType } = req.body as {
-      fileNames: string[];
+    const { files, panelType } = req.body as {
+      files: Array<{
+        fileName: string;
+        mimeType: string;
+        extractedText?: string;
+        images: Array<{
+          mimeType: string;
+          dataBase64: string;
+          pageNumber?: number;
+        }>;
+      }>;
       panelType?: string;
     };
 
     const uploadResult = await bloodTestService.createUploadedResult(userId, {
-      fileNames,
+      files,
       ...(panelType ? { panelType } : {}),
     });
 

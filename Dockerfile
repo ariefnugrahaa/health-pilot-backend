@@ -17,7 +17,10 @@ ARG NPM_FETCH_RETRY_MINTIMEOUT
 ARG NPM_FETCH_RETRY_MAXTIMEOUT
 
 # Install dependencies for native modules
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache libc6-compat python3 make g++
+
+# Install dependencies for native modules
+RUN apk add --no-cache python3 make g++
 
 # Copy package files
 COPY package.json package-lock.json* ./
@@ -82,7 +85,7 @@ ARG NPM_FETCH_RETRY_MINTIMEOUT
 ARG NPM_FETCH_RETRY_MAXTIMEOUT
 
 # Install dependencies for native modules
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache libc6-compat python3 make g++
 
 # Sort env
 ENV NODE_ENV=development
@@ -148,7 +151,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+    CMD sh -c 'wget --no-verbose --tries=1 --spider http://localhost:${PORT:-3000}/health || exit 1'
 
 # Start application
 CMD ["node", "dist/index.js"]

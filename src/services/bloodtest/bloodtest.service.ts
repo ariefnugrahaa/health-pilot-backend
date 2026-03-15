@@ -4,6 +4,10 @@ import logger from '../../utils/logger.js';
 import { NotFoundError, ValidationError } from '../../api/middlewares/error.middleware.js';
 import { bloodTestInterpretationService } from './bloodtest-interpretation.service.js';
 import type { BloodTestResult } from '../../types/index.js';
+import {
+  bloodTestUploadExtractionService,
+  type UploadedBloodTestFileInput,
+} from './bloodtest-upload-extraction.service.js';
 
 type LabServiceType = 'HOME_VISIT' | 'ON_SITE';
 type BiomarkerStatus = 'IN_RANGE' | 'SLIGHTLY_HIGH' | 'SLIGHTLY_LOW';
@@ -66,7 +70,7 @@ export interface CreateBloodTestBookingResult {
 }
 
 export interface UploadBloodTestResultInput {
-  fileNames: string[];
+  files: UploadedBloodTestFileInput[];
   panelType?: string;
 }
 
@@ -410,9 +414,11 @@ export class BloodTestService implements IBloodTestService {
       throw new ValidationError('Invalid panel type');
     }
 
-    if (input.fileNames.length === 0) {
+    if (input.files.length === 0) {
       throw new ValidationError('At least one uploaded file is required');
     }
+
+    const extractedResults = await bloodTestUploadExtractionService.extract(input.files);
 
     const labPartner = await prisma.labPartner.findFirst({
       where: { isActive: true },
@@ -425,37 +431,35 @@ export class BloodTestService implements IBloodTestService {
         userId,
         status: 'ORDERED',
         panelType,
-        biomarkersRequested: DEMO_BLOOD_TEST_RESULTS.map((result) => result.biomarkerCode),
+        biomarkersRequested: extractedResults.map((result) => result.biomarkerCode),
         labPartnerId: labPartner?.id ?? null,
         orderedAt: now,
         sampleCollectedAt: now,
       },
     });
 
-    await this.processResults(
-      test.id,
-      DEMO_BLOOD_TEST_RESULTS.map((result) => ({
-        biomarkerCode: result.biomarkerCode,
-        value: result.value,
-        unit: result.unit,
-        isAbnormal: result.isAbnormal,
-        ...(result.referenceMin !== undefined ? { referenceMin: result.referenceMin } : {}),
-        ...(result.referenceMax !== undefined ? { referenceMax: result.referenceMax } : {}),
-      }))
-    );
+    await this.processResults(test.id, extractedResults);
 
-    await this.storeDemoInterpretation(test.id);
+    try {
+      await bloodTestInterpretationService.regenerateInterpretation(test.id, userId);
+    } catch (error) {
+      logger.error('Failed to generate uploaded blood test interpretation', {
+        testId: test.id,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
 
     logger.info('Blood test upload result created', {
       testId: test.id,
       userId,
-      uploadedFiles: input.fileNames,
+      uploadedFiles: input.files.map((file) => file.fileName),
+      biomarkerCount: extractedResults.length,
     });
 
     return {
       testId: test.id,
       status: 'COMPLETED',
-      uploadedFiles: input.fileNames,
+      uploadedFiles: input.files.map((file) => file.fileName),
     };
   }
 
@@ -496,9 +500,9 @@ export class BloodTestService implements IBloodTestService {
           biomarker = await tx.biomarker.create({
             data: {
               code: result.biomarkerCode,
-              name: result.biomarkerCode,
+              name: result.biomarkerName ?? result.biomarkerCode,
               unit: result.unit,
-              category: 'general',
+              category: result.biomarkerCategory ?? 'general',
             },
           });
         }
@@ -602,9 +606,16 @@ export class BloodTestService implements IBloodTestService {
       { inRange: 0, slightlyHigh: 0, slightlyLow: 0 }
     );
 
+    const featuredBiomarkerCodes = FEATURED_BLOOD_TEST_CODES.filter((code) =>
+      biomarkers.some((biomarker) => biomarker.code === code)
+    );
+    const effectiveFeaturedCodes = featuredBiomarkerCodes.length > 0
+      ? featuredBiomarkerCodes
+      : biomarkers.slice(0, 4).map((biomarker) => biomarker.code);
+
     return {
       testId,
-      intakeAssignment: 'Blood-Enhanced Intake',
+      intakeAssignment: booking ? 'Comprehensive Medical Intake' : 'Blood-Enhanced Intake',
       overallHeadline:
         counts.slightlyHigh === 0 && counts.slightlyLow === 0
           ? 'All key markers are in range'
@@ -614,7 +625,7 @@ export class BloodTestService implements IBloodTestService {
         'Most of your key biomarkers are within the optimal ranges, with a few areas to keep an eye on.',
       counts,
       biomarkers,
-      featuredBiomarkerCodes: FEATURED_BLOOD_TEST_CODES,
+      featuredBiomarkerCodes: effectiveFeaturedCodes,
       booking: {
         id: booking?.id ?? null,
         labName: booking?.lab.name ?? test.labPartner?.name ?? 'Partner Lab',
